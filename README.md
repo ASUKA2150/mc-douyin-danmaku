@@ -2,19 +2,20 @@
 
 把**抖音直播间的弹幕**实时搬到 Minecraft 聊天栏里。开播的时候不用再拿手机、也不用另开个窗口盯着，游戏里直接就是弹幕姬。
 
-**当前分支：Minecraft 1.21.1**，提供 Fabric 和 NeoForge 两个版本。
+**当前分支：Minecraft 1.21.1**，三个加载器都有：Fabric / NeoForge / Forge。
 
 | 你的游戏 | 下载这个 | 还要装什么 |
 |---|---|---|
-| 1.21.x + Fabric | `douyin-danmaku-fabric-1.21.x-x.x.x.jar` | [Fabric API](https://modrinth.com/mod/fabric-api) |
-| 1.21.x + NeoForge | `douyin-danmaku-neoforge-1.21.x-x.x.x.jar` | 不用 |
+| Minecraft **1.21.1** + Fabric | `douyin-danmaku-fabric-1.21.1-1.0.0.jar` | [Fabric API](https://modrinth.com/mod/fabric-api) |
+| Minecraft **1.21.1** + NeoForge | `douyin-danmaku-neoforge-1.21.1-1.0.0.jar` | 不用 |
+| Minecraft **1.21.1** + Forge | `douyin-danmaku-forge-1.21.1-1.0.0.jar` | 不用 |
+
+> **文件名里是具体的 `1.21.1`，不是分支名 `1.21.x`。**
+> 分支名是仓库里用的，jar 文件名永远带具体版本号。
 
 > **想要别的 Minecraft 版本？**
 > - **1.20.x**（Fabric / Forge）→ [`1.20.x` 分支](../../tree/1.20.x)
 > - **全部版本一起** → [`main` 分支](../../tree/main)
->
-> 1.21.1 没有 Forge，因为从 Minecraft 1.20.2 起 Forge 和 NeoForge 就分家了，
-> 新版本的主流是 NeoForge。
 >
 > 分支是按大版本切的，不是每个小版本一个。
 > 想要某个新版本可以在 Issues 里提。
@@ -72,6 +73,7 @@
 |---|---|---|
 | Fabric | `douyin-danmaku-fabric-1.21.1-x.x.x.jar` | [Fabric API](https://modrinth.com/mod/fabric-api) |
 | NeoForge | `douyin-danmaku-neoforge-1.21.1-x.x.x.jar` | 不用 |
+| Forge | `douyin-danmaku-forge-1.21.1-x.x.x.jar` | 不用 |
 
 **文件名里的版本号就是对应的 Minecraft 版本**，照着挑就不会错。
 
@@ -609,10 +611,11 @@ cd mc-douyin-danmaku
 
 > `-b 1.21.x` 是取这个分支。想要 1.20.1 的版本把分支名换成 `1.20.x`。
 
-产物在 `build/libs/`，一次出两个：
+产物在 `build/libs/`，一次出**三个**：
 
 ```
 douyin-danmaku-fabric-1.21.1-1.0.0.jar
+douyin-danmaku-forge-1.21.1-1.0.0.jar
 douyin-danmaku-neoforge-1.21.1-1.0.0.jar
 ```
 
@@ -621,6 +624,7 @@ douyin-danmaku-neoforge-1.21.1-1.0.0.jar
 ```bash
 ./gradlew :fabric-1.21.1:build
 ./gradlew :neoforge-1.21.1:build
+./gradlew :forge-1.21.1:build
 ```
 
 ### Windows 用户注意
@@ -665,7 +669,7 @@ $env:JAVA_HOME = 'C:\Program Files\Microsoft\jdk-21.0.9.10-hotspot'
 Gradle 官方分发站在国内经常连不上，
 `gradle/wrapper/gradle-wrapper.properties` 里的地址已经换成腾讯云镜像了。
 
-构建完会自动跑一次元数据自检（`verifyJars`），检查**两个** jar 里的
+构建完会自动跑一次元数据自检（`verifyJars`），检查**三个** jar 里的
 `fabric.mod.json` / `neoforge.mods.toml` / `pack.mcmeta`
 对不对，包括：
 
