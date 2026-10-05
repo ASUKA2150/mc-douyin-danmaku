@@ -4,6 +4,19 @@
 
 支持 **Minecraft 1.20.1 和 1.21.1**，Fabric / NeoForge / Forge 三个加载器都有对应版本。
 
+**当前是 `main` 分支**，包含全部四个版本，适合开发。只想给某一个
+Minecraft 版本编译的话，用对应的精简分支（依赖更少、构建更快）：
+
+| 分支 | 内容 | 备注 |
+|---|---|---|
+| `main` | 全部四个版本 | 当前分支，开发用 |
+| [`1.20.x`](../../tree/1.20.x) | 1.20.1 的 Fabric + Forge | |
+| [`1.21.x`](../../tree/1.21.x) | 1.21.1 的 Fabric + NeoForge | **不需要 JDK 17** |
+
+> **只是想下载来玩？** 不用管分支，去
+> [Releases](https://github.com/ASUKA2150/mc-douyin-danmaku/releases)
+> 按你的 Minecraft 版本挑对应的包就行。
+
 > 这个项目的灵感来自 [BakaDanmaku](https://github.com/TartaricAcid/BakaDanmaku)（B 站弹幕，最早把「弹幕进聊天栏」这条路走通的）和 [DanmuFree](https://github.com/SoraYjy/DanmuFree)（抖音弹幕抓取客户端，抖音协议的实现思路来自它）。详见文末「致谢与开源说明」。
 
 ---
