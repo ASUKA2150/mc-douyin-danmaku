@@ -2,14 +2,15 @@
 
 把**抖音直播间的弹幕**实时搬到 Minecraft 聊天栏里。开播的时候不用再拿手机、也不用另开个窗口盯着，游戏里直接就是弹幕姬。
 
-支持 **Minecraft 1.20.1 和 1.21.1**，Fabric / NeoForge / Forge 三个加载器都有对应版本。
+支持 **Minecraft 1.20.1 和 1.21.1**，Fabric / NeoForge / Forge 三个加载器都有对应版本，
+一共**五个** jar。
 
-**当前是 `main` 分支**，包含全部四个版本，适合开发。只想给某一个
+**当前是 `main` 分支**，包含全部五个版本，适合开发。只想给某一个
 Minecraft 版本编译的话，用对应的精简分支（依赖更少、构建更快）：
 
 | 分支 | 内容 | 备注(测试环境) |
 |---|---|---|
-| `main` | 全部四个版本 | 当前分支，开发用 |
+| `main` | 全部五个版本 | 当前分支，开发用 |
 | [`1.20.x`](../../tree/1.20.x) | 1.20.1 的 Fabric + Forge | **JDK 17** |
 | [`1.21.x`](../../tree/1.21.x) | 1.21.1 的 Fabric + NeoForge | **JDK 21** |
 
@@ -68,24 +69,28 @@ Minecraft 版本编译的话，用对应的精简分支（依赖更少、构建�
 
 | 你的游戏 | 下载这个 | 还要装什么 |
 |---|---|---|
-| Minecraft **1.20.x** + Fabric | `douyin-danmaku-fabric-1.20.x-1.0.0.jar` | [Fabric API](https://modrinth.com/mod/fabric-api) |
-| Minecraft **1.20.x** + Forge | `douyin-danmaku-forge-1.20.x-1.0.0.jar` | 不用 |
-| Minecraft **1.21.x** + Fabric | `douyin-danmaku-fabric-1.21.x-1.0.0.jar` | [Fabric API](https://modrinth.com/mod/fabric-api) |
-| Minecraft **1.21.x** + NeoForge | `douyin-danmaku-neoforge-1.21.x-1.0.0.jar` | 不用 |
+| Minecraft **1.20.1** + Fabric | `douyin-danmaku-fabric-1.20.1-1.0.0.jar` | [Fabric API](https://modrinth.com/mod/fabric-api) |
+| Minecraft **1.20.1** + Forge | `douyin-danmaku-forge-1.20.1-1.0.0.jar` | 不用 |
+| Minecraft **1.21.1** + Fabric | `douyin-danmaku-fabric-1.21.1-1.0.0.jar` | [Fabric API](https://modrinth.com/mod/fabric-api) |
+| Minecraft **1.21.1** + NeoForge | `douyin-danmaku-neoforge-1.21.1-1.0.0.jar` | 不用 |
+| Minecraft **1.21.1** + Forge | `douyin-danmaku-forge-1.21.1-1.0.0.jar` | 不用 |
 
 **文件名里的版本号就是对应的 Minecraft 版本**，照着挑就不会错。
+（注意是具体的 `1.20.1` / `1.21.1`，不是分支名 `1.20.x` ——
+分支名是仓库里用的，jar 文件名永远带具体版本号。）
 
-为什么没有别的组合（不是偷懒，是上游就没有）：
+各版本支持的加载器（不是偷懒，是上游的实际情况）：
 
 | Minecraft | Fabric | NeoForge | Forge |
 |---|---|---|---|
-| 1.21.1 | 有 | 有 | 无 |
-| 1.20.1 | 有 | 无 | 有 |
+| 1.21.1 | 有 | 有 | 有 |
+| 1.20.1 | 有 | — | 有 |
 
-- **1.20.1 没有 NeoForge**：NeoForge 是 Forge 分家出来的，
-  第一个版本给的是 Minecraft 1.20.2。
-- **1.21.1 没有 Forge**：1.20.2 之后两者分道扬镳，
-  新版本主流是 NeoForge，Forge 基本停在 1.20.1。
+- **1.20.1 没有 NeoForge**：NeoForge 是 Forge 分家出来的，第一个版本给的是
+  Minecraft 1.20.2，1.20.1 时代只有 Forge。
+- **1.21.1 反而三家都有**：很多人以为 Forge 停在 1.20.1 了，其实它一直在
+  跟进（1.21.1 是 build 52.x，1.21.4 是 54.x，1.21.5 是 55.x），
+  所以 1.21.1 这个版本你选哪个加载器都行。
 
 > 想自己编译也行，见[自己编译](#自己编译)。
 
@@ -575,7 +580,7 @@ Minecraft 版本编译的话，用对应的精简分支（依赖更少、构建�
                         │
                         ▼
 ┌──────────────────────────────────────────────────────┐
-│  模组核心（common 模块，两个加载器共用）               │
+│  模组核心（common 模块，所有版本共用）               │
 │                                                      │
 │   1. 认出弹幕通道   ChromeDanmakuSource               │
 │   2. 解 protobuf    DouyinProtocol（手写解码器）       │
@@ -613,8 +618,9 @@ Minecraft 版本编译的话，用对应的精简分支（依赖更少、构建�
 
 需要 **JDK 21**。
 
-> 只编译 Fabric 和 NeoForge 的话，到这一步就够了。
-> 要连 Forge 1.20.1 一起编译，还需要一个 **JDK 17**，见下面「关于 JDK 17」。
+> 只编译 `fabric-1.20.1`、`forge-1.21.1`、`neoforge-1.21.1`、
+> `fabric-1.21.1` 这四个的话，到这一步就够了。
+> **只有 `forge-1.20.1` 需要额外的 JDK 17**，见下面「关于 JDK 17」。
 
 ```bash
 git clone https://github.com/ASUKA2150/mc-douyin-danmaku.git
@@ -622,28 +628,37 @@ cd mc-douyin-danmaku
 ./gradlew collectJars
 ```
 
-产物在 `build/libs/`，一次出四个：
+产物在 `build/libs/`，一次出**五个**：
 
 ```
 douyin-danmaku-fabric-1.20.1-1.0.0.jar
 douyin-danmaku-fabric-1.21.1-1.0.0.jar
 douyin-danmaku-forge-1.20.1-1.0.0.jar
+douyin-danmaku-forge-1.21.1-1.0.0.jar
 douyin-danmaku-neoforge-1.21.1-1.0.0.jar
 ```
 
-只想编译其中一个（子项目名就是目录名，但 `fabric/` 对应 `:fabric-1.21.1`）：
+只想编译其中一个（子项目名就是「加载器 + MC 版本」，
+只有 `fabric/` 目录对应 `:fabric-1.21.1`）：
 
 ```bash
 ./gradlew :fabric-1.20.1:build
 ./gradlew :forge-1.20.1:build
+./gradlew :forge-1.21.1:build
 ./gradlew :neoforge-1.21.1:build
 ```
 
 ### 关于 JDK 17
 
-**为什么需要两个 JDK**：Fabric 和 NeoForge 的构建插件都认 JDK 21，
-但 Forge 1.20.1 用的 ForgeGradle 本身跑在 Java 17 上——这是它写死的，
-不是我们能选的。
+**五个模块里只有 `forge-1.20.1` 需要 JDK 17。**
+
+原因：Forge 1.20.1 用的构建插件 ForgeGradle 本身跑在 Java 17 上——
+这是它写死的，不是我们能选的。
+
+有意思的是 **`forge-1.21.1` 反而不需要**：Forge 在 1.20.2 之后换了做法，
+ForgeGradle 支持用 JDK 21 构建 1.21.1（本项目的实测结果）。
+
+所以如果你不编译 1.20.1 那个 Forge 版本，只要装个 JDK 21 就行。
 
 **Gradle 不一定能自己找到 JDK 17。** 它只会在几个固定位置找
 （当前 JVM、`JAVA_HOME`、Windows 注册表、PATH），装在别处就找不到，
@@ -729,7 +744,7 @@ systemProp.net.minecraftforge.gradle.check.certs=false
 它只影响这一次额外的连通性检查，不影响 Gradle 自己下载依赖时的证书校验。
 如果你在墙外、或者没遇到这个问题，把那行删掉就行。
 
-构建完会自动跑一次元数据自检（`verifyJars`），检查**四个** jar 里的
+构建完会自动跑一次元数据自检（`verifyJars`），检查**五个** jar 里的
 `fabric.mod.json` / `mods.toml` / `neoforge.mods.toml` / `pack.mcmeta`
 对不对，包括：
 
@@ -747,7 +762,7 @@ systemProp.net.minecraftforge.gradle.check.certs=false
 
 ```
 mc-douyin-danmaku/
-├── common/src/main/java/          ← 核心代码，两个加载器共用
+├── common/src/main/java/          ← 核心代码，所有版本共用
 │   └── com/douyindanmaku/core/
 │       ├── DanmakuSession.java      把数据源和显示串起来
 │       ├── config/                  配置
@@ -767,7 +782,8 @@ mc-douyin-danmaku/
 ├── fabric/                        ← Fabric 1.21.1 端（约 435 行）
 ├── fabric-1.20.1/                 ← Fabric 1.20.1 端（和上面逐字节相同）
 ├── neoforge/                      ← NeoForge 1.21.1 端（约 426 行）
-└── forge-1.20.1/                  ← Forge 1.20.1 端（约 458 行）
+├── forge-1.20.1/                  ← Forge 1.20.1 端（约 458 行）
+└── forge-1.21.1/                  ← Forge 1.21.1 端（约 470 行，比上面那份还简单）
 ```
 
 > 目录名和 Gradle 子项目名不完全对应（`fabric/` 对应子项目
@@ -776,7 +792,7 @@ mc-douyin-danmaku/
 `common` 里的代码**不允许 import 任何 Fabric / NeoForge / Forge / Minecraft 的类**，
 这样它才能被所有版本共用。这条约定靠 `build.gradle` 里的注释和代码审查保证。
 
-那四个加载器端的代码里，真正碰 Minecraft 的只有十几个方法调用，
+那五个加载器端的代码里，真正碰 Minecraft 的只有十几个方法调用，
 而且这些 API 在 1.20.1 到 1.21.4 之间**一个都没变**——所以换版本时
 适配层几乎不用改，这也是多版本工程能维持下去的原因。
 
@@ -786,15 +802,18 @@ Minecraft 版本和加载器的组合并不是任意的，实际情况是：
 
 | Minecraft | Fabric | NeoForge | Forge |
 |---|---|---|---|
-| 1.21.1 | 有 | 有 | — |
+| 1.21.1 | 有 | 有 | 有 |
 | 1.20.1 | 有 | — | 有 |
 
-两个「—」的原因：
+唯一的「—」：
 
 - **1.20.1 没有 NeoForge。** NeoForge 是 Forge 分家出来的，第一个版本是给
   Minecraft 1.20.2 的。1.20.1 时代只有 Forge。
-- **1.21.1 没有 Forge。** 1.20.2 之后 Forge 和 NeoForge 分道扬镳，
-  新版本的主流是 NeoForge，Forge 基本停在 1.20.1 那条线。
+
+> **常见误解：很多人以为 Forge 停在 1.20.1 了，其实没有。**
+> 它一直在跟进新版本（1.21.1 是 build 52.x，1.21.4 是 54.x，
+> 1.21.5 是 55.x，26.1 是 62.x），只是新版本上 NeoForge 更流行。
+> 所以 1.21.1 这个版本反而是三个加载器齐全的。
 
 ### 分支与发布约定
 
@@ -803,7 +822,7 @@ Minecraft 版本和加载器的组合并不是任意的，实际情况是：
 
 | 分支 | 内容 | 标签 | Release |
 |---|---|---|---|
-| `main` | 全部四个版本 | 无 | 无（开发用，不发） |
+| `main` | 全部五个版本 | 无 | 无（开发用，不发） |
 | `1.20.x` | 1.20.1 的 Fabric + Forge | `1.20.x` | `1.20.x` |
 | `1.21.x` | 1.21.1 的 Fabric + NeoForge | `1.21.x` | `1.21.x` |
 

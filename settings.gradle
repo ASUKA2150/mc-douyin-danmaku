@@ -31,11 +31,15 @@ rootProject.name = 'mc-douyin-danmaku'
 // =====================================================================
 
 // ---- Minecraft 1.21.1 ----
+// 这个版本三个加载器齐全：Forge 在 1.21.1 上一直在更新（build 号 52.x），
+// 和 NeoForge 并存，不像 1.20.1 那样只有 Forge。
 include 'fabric-1.21.1'
 project(':fabric-1.21.1').projectDir = file('fabric')
 
 include 'neoforge-1.21.1'
 project(':neoforge-1.21.1').projectDir = file('neoforge')
+
+include 'forge-1.21.1'
 
 // ---- Minecraft 1.20.1 ----
 // 注意：1.20.1 只有 Fabric 和 Forge，没有 NeoForge——
