@@ -2,15 +2,18 @@
 
 把**抖音直播间的弹幕**实时搬到 Minecraft 聊天栏里。开播的时候不用再拿手机、也不用另开个窗口盯着，游戏里直接就是弹幕姬。
 
-**当前分支：Minecraft 1.20.x**，提供 Fabric 和 Forge 两个版本。
+**当前分支：Minecraft 1.20.1**，提供 Fabric 和 Forge 两个版本。
 
 | 你的游戏 | 下载这个 | 还要装什么 |
 |---|---|---|
-| 1.20.x + Fabric | `douyin-danmaku-fabric-1.20.x-x.x.x.jar` | [Fabric API](https://modrinth.com/mod/fabric-api) |
-| 1.20.x + Forge | `douyin-danmaku-forge-1.20.x-x.x.x.jar` | 不用 |
+| Minecraft **1.20.1** + Fabric | `douyin-danmaku-fabric-1.20.1-1.0.0.jar` | [Fabric API](https://modrinth.com/mod/fabric-api) |
+| Minecraft **1.20.1** + Forge | `douyin-danmaku-forge-1.20.1-1.0.0.jar` | 不用 |
+
+> **文件名里是具体的 `1.20.1`，不是分支名 `1.20.x`。**
+> 分支名是仓库里用的，jar 文件名永远带具体版本号。
 
 > **想要别的 Minecraft 版本？**
-> - **1.21.x**（Fabric / NeoForge）→ [`1.21.x` 分支](../../tree/1.21.x)
+> - **1.21.x**（Fabric / NeoForge / Forge）→ [`1.21.x` 分支](../../tree/1.21.x)
 > - **全部版本一起** → [`main` 分支](../../tree/main)
 >
 > 1.20.1 没有 NeoForge，因为 NeoForge 是从 Minecraft 1.20.2 才开始有的。
