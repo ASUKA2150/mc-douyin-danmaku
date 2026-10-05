@@ -7,11 +7,11 @@
 **当前是 `main` 分支**，包含全部四个版本，适合开发。只想给某一个
 Minecraft 版本编译的话，用对应的精简分支（依赖更少、构建更快）：
 
-| 分支 | 内容 | 备注 |
+| 分支 | 内容 | 备注(测试环境) |
 |---|---|---|
 | `main` | 全部四个版本 | 当前分支，开发用 |
-| [`1.20.x`](../../tree/1.20.x) | 1.20.1 的 Fabric + Forge | |
-| [`1.21.x`](../../tree/1.21.x) | 1.21.1 的 Fabric + NeoForge | **不需要 JDK 17** |
+| [`1.20.x`](../../tree/1.20.x) | 1.20.1 的 Fabric + Forge | **JDK 17** |
+| [`1.21.x`](../../tree/1.21.x) | 1.21.1 的 Fabric + NeoForge | **JDK 21** |
 
 > **只是想下载来玩？** 不用管分支，去
 > [Releases](https://github.com/ASUKA2150/mc-douyin-danmaku/releases)
@@ -68,10 +68,10 @@ Minecraft 版本编译的话，用对应的精简分支（依赖更少、构建�
 
 | 你的游戏 | 下载这个 | 还要装什么 |
 |---|---|---|
-| Minecraft **1.20.1** + Fabric | `douyin-danmaku-fabric-1.20.1-1.0.0.jar` | [Fabric API](https://modrinth.com/mod/fabric-api) |
-| Minecraft **1.20.1** + Forge | `douyin-danmaku-forge-1.20.1-1.0.0.jar` | 不用 |
-| Minecraft **1.21.1** + Fabric | `douyin-danmaku-fabric-1.21.1-1.0.0.jar` | [Fabric API](https://modrinth.com/mod/fabric-api) |
-| Minecraft **1.21.1** + NeoForge | `douyin-danmaku-neoforge-1.21.1-1.0.0.jar` | 不用 |
+| Minecraft **1.20.x** + Fabric | `douyin-danmaku-fabric-1.20.x-1.0.0.jar` | [Fabric API](https://modrinth.com/mod/fabric-api) |
+| Minecraft **1.20.x** + Forge | `douyin-danmaku-forge-1.20.x-1.0.0.jar` | 不用 |
+| Minecraft **1.21.x** + Fabric | `douyin-danmaku-fabric-1.21.x-1.0.0.jar` | [Fabric API](https://modrinth.com/mod/fabric-api) |
+| Minecraft **1.21.x** + NeoForge | `douyin-danmaku-neoforge-1.21.x-1.0.0.jar` | 不用 |
 
 **文件名里的版本号就是对应的 Minecraft 版本**，照着挑就不会错。
 
@@ -980,7 +980,7 @@ pwsh -File tools/selfcheck/run.ps1 # Windows PowerShell
 简单说就是：**随便用**。你可以自由使用、修改、分发、甚至拿去商用或闭源，
 唯一的条件是保留版权声明（也就是别把 `LICENSE` 文件删掉）。
 
-> 做这个模组的初衷就是让 MC 小主播能方便地看弹幕。
+> 做这个模组的初衷就是让你能方便地看弹幕。
 > 觉得有用的话直接拿走用就行，搬运到别的地方也完全没问题。
 
 ## 参与贡献
