@@ -6,17 +6,17 @@
 
 | 你的游戏 | 下载这个 | 还要装什么 |
 |---|---|---|
-| 1.21.1 + Fabric | `douyin-danmaku-fabric-1.21.1-x.x.x.jar` | [Fabric API](https://modrinth.com/mod/fabric-api) |
-| 1.21.1 + NeoForge | `douyin-danmaku-neoforge-1.21.1-x.x.x.jar` | 不用 |
+| 1.21.x + Fabric | `douyin-danmaku-fabric-1.21.x-x.x.x.jar` | [Fabric API](https://modrinth.com/mod/fabric-api) |
+| 1.21.x + NeoForge | `douyin-danmaku-neoforge-1.21.x-x.x.x.jar` | 不用 |
 
 > **想要别的 Minecraft 版本？**
-> - **1.20.1**（Fabric / Forge）→ [`1.20.x` 分支](../../tree/1.20.x)
-> - **全部四个版本一起** → [`main` 分支](../../tree/main)
+> - **1.20.x**（Fabric / Forge）→ [`1.20.x` 分支](../../tree/1.20.x)
+> - **全部版本一起** → [`main` 分支](../../tree/main)
 >
 > 1.21.1 没有 Forge，因为从 Minecraft 1.20.2 起 Forge 和 NeoForge 就分家了，
 > 新版本的主流是 NeoForge。
 >
-> 分支是按「人们实际在玩的版本」切的，不是每个小版本一个。
+> 分支是按大版本切的，不是每个小版本一个。
 > 想要某个新版本可以在 Issues 里提。
 
 > 这个项目的灵感来自 [BakaDanmaku](https://github.com/TartaricAcid/BakaDanmaku)（B 站弹幕，最早把「弹幕进聊天栏」这条路走通的）和 [DanmuFree](https://github.com/SoraYjy/DanmuFree)（抖音弹幕抓取客户端，抖音协议的实现思路来自它）。详见文末「致谢与开源说明」。
@@ -899,7 +899,7 @@ pwsh -File tools/selfcheck/run.ps1 # Windows PowerShell
 简单说就是：**随便用**。你可以自由使用、修改、分发、甚至拿去商用或闭源，
 唯一的条件是保留版权声明（也就是别把 `LICENSE` 文件删掉）。
 
-> 做这个模组的初衷就是让 MC 小主播能方便地看弹幕。
+> 做这个模组的初衷就是让你能方便地看弹幕。
 > 觉得有用的话直接拿走用就行，搬运到别的地方也完全没问题。
 
 ## 参与贡献
