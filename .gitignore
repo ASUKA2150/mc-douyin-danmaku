@@ -1,0 +1,37 @@
+# Gradle
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+!**/src/**/build/
+
+# 本仓库自带的工具链（Gradle 发行包等，体积大，不入库）
+.tools/
+
+# 开发时的临时目录
+_ref/
+tools/selfcheck/out/
+tools/cdpcheck/out/
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.settings/
+.classpath
+.project
+run/
+runs/
+
+# 操作系统
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Java
+*.class
+hs_err_pid*
+
+# 日志
+*.log

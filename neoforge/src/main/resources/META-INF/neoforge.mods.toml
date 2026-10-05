@@ -1,0 +1,26 @@
+modLoader = "javafml"
+loaderVersion = "[1,)"
+license = "${modLicense}"
+
+[[mods]]
+modId = "douyindanmaku"
+version = "${version}"
+displayName = "${modName}"
+authors = "${modAuthors}"
+description = '''
+${modDescription}
+'''
+
+[[dependencies.douyindanmaku]]
+modId = "neoforge"
+type = "required"
+versionRange = "${neoforgeRange}"
+ordering = "NONE"
+side = "CLIENT"
+
+[[dependencies.douyindanmaku]]
+modId = "minecraft"
+type = "required"
+versionRange = "${minecraftRange}"
+ordering = "NONE"
+side = "CLIENT"

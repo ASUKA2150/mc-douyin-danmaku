@@ -1,0 +1,80 @@
+// =====================================================================
+//  NeoForge 1.21.1 子项目
+// =====================================================================
+
+plugins {
+    // 插件版本必须是字面量（plugins {} 块不支持属性插值）
+    id 'net.neoforged.moddev' version '1.0.24'
+}
+
+def mcVersion = project.property('minecraft.version')
+def neoForgeVersion = project.property('neoforge.version')
+
+base {
+    archivesName = "douyin-danmaku-neoforge-${mcVersion}"
+}
+
+// ---------------------------------------------------------------------
+//  共用核心源码（与 Fabric 侧是同一份文件）
+//  只允许依赖 JDK 与 Gson（Minecraft 自带），
+//  不允许 import 任何 Fabric / NeoForge / Minecraft 的类。
+// ---------------------------------------------------------------------
+sourceSets {
+    main {
+        java {
+            srcDir rootProject.file('common/src/main/java')
+        }
+        resources {
+            srcDir rootProject.file('common/src/main/resources')
+        }
+    }
+}
+
+neoForge {
+    version = neoForgeVersion
+
+    runs {
+        client {
+            client()
+        }
+    }
+
+    mods {
+        // 与 neoforge.mods.toml 里的 modId 一致
+        douyindanmaku {
+            sourceSet sourceSets.main
+        }
+    }
+}
+
+def expandProps = [
+        version        : project.version,
+        modName        : rootProject.property('mod.name'),
+        modDescription : rootProject.property('mod.description'),
+        modAuthors     : rootProject.property('mod.authors'),
+        modLicense     : rootProject.property('mod.license'),
+        minecraftRange : rootProject.property('minecraft.version_range'),
+        neoforgeRange  : rootProject.property('neoforge.version_range'),
+]
+
+processResources {
+    inputs.properties(expandProps)
+    filesMatching('META-INF/neoforge.mods.toml') {
+        expand(expandProps)
+    }
+}
+
+jar {
+    def licenseFile = rootProject.file('LICENSE')
+    if (licenseFile.exists()) {
+        from(licenseFile) {
+            rename { "LICENSE_${rootProject.name}" }
+        }
+    }
+}
+
+tasks.register('collectJar', Copy) {
+    dependsOn tasks.named('jar')
+    from tasks.named('jar').flatMap { it.archiveFile }
+    into rootProject.layout.buildDirectory.dir('libs')
+}

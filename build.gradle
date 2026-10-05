@@ -1,0 +1,174 @@
+// =====================================================================
+//  根构建脚本
+//  ---------------------------------------------------------------------
+//  这个仓库同时产出两个加载器的 jar：
+//    :fabric   -> Fabric 1.21.1
+//    :neoforge -> NeoForge 1.21.1
+//
+//  两个子项目共用同一份「与加载器无关」的核心代码，
+//  源码位置在 common/src/main/java，由各子项目的 build.gradle 挂进去。
+//
+//  注意：Gradle 的 plugins {} 块不接受属性插值，
+//  所以加载器插件（loom / moddev）的版本必须写在各子项目的 build.gradle
+//  里作为字面量。其余版本号统一放在根 gradle.properties。
+// =====================================================================
+subprojects {
+    apply plugin: 'java'
+
+    version = rootProject.property('mod.version')
+    group = rootProject.property('mod.group')
+
+    java {
+        // Minecraft 1.21.1 使用 Java 21
+        toolchain {
+            languageVersion = JavaLanguageVersion.of(rootProject.property('java.version') as int)
+        }
+        withSourcesJar()
+    }
+
+    tasks.withType(JavaCompile).configureEach {
+        // 保持 UTF-8，避免中文注释 / 中文模板在 Windows 上乱码
+        options.encoding = 'UTF-8'
+        options.release = rootProject.property('java.version') as int
+    }
+
+    repositories {
+        mavenCentral()
+        maven { name = 'Fabric';       url = 'https://maven.fabricmc.net/' }
+        maven { name = 'NeoForged';    url = 'https://maven.neoforged.net/releases' }
+        maven { name = 'Mojang';       url = 'https://libraries.minecraft.net/' }
+        maven { name = 'Architectury'; url = 'https://maven.architectury.dev/' }
+    }
+}
+
+// ---------------------------------------------------------------------
+//  gradlew 的下载地址
+//  Gradle 官方分发站在国内经常连不上，默认换成腾讯云镜像。
+//  想用官方源的话，改成 https://services.gradle.org/distributions 即可。
+// ---------------------------------------------------------------------
+def wrapperDistUrl = project.findProperty('gradle.distribution.url')
+        ?: 'https://mirrors.cloud.tencent.com/gradle'
+
+wrapper {
+    gradleVersion = '8.14.3'
+    distributionType = Wrapper.DistributionType.BIN
+    distributionUrl = "${wrapperDistUrl}/gradle-${gradleVersion}-bin.zip"
+}
+
+// 让 `gradlew build` 在没有 wrapper 文件时也能自举：
+// wrapper 任务本身是内置的，所以这个依赖不会造成循环。
+tasks.register('collectJars') {
+    group = 'build'
+    description = '构建两个加载器的 jar，并收集到根目录 build/libs'
+    dependsOn ':fabric:collectJar', ':neoforge:collectJar'
+    finalizedBy 'verifyJars'
+}
+
+// ---------------------------------------------------------------------
+//  打包后自检：检查两个 jar 的元数据文有没有被模板替换搞坏
+//
+//  为什么需要这个：元数据里的问题（版本号写错、模板占位符没替掉）
+//  在构建阶段完全看不出来，只有真人把 jar 装进游戏才会暴露，
+//  而且报错信息往往很绕（比如 Fabric 说「需要 1.21.1 但你装的是 1.21.1」）。
+//
+//  这个任务把「人肉测试才能发现」的问题提前到构建阶段。
+// ---------------------------------------------------------------------
+tasks.register('verifyJars') {
+    group = 'verification'
+    description = '检查打好的 jar 里元数据是否正确（版本号、占位符、图标）'
+    dependsOn ':fabric:collectJar', ':neoforge:collectJar'
+
+    def libsDir = layout.buildDirectory.dir('libs')
+    def rootName = rootProject.name
+
+    doLast {
+        def problems = []
+        def libs = libsDir.get().asFile
+        def jars = libs.listFiles({ f -> f.name.endsWith('.jar') } as java.io.FileFilter)
+
+        if (jars == null || jars.length == 0) {
+            throw new GradleException("build/libs 里没有 jar，构建可能失败了")
+        }
+
+        jars.each { jar ->
+            def zip = new java.util.zip.ZipFile(jar)
+            try {
+                // ---------- Fabric ----------
+                def fabricEntry = zip.getEntry('fabric.mod.json')
+                if (fabricEntry != null) {
+                    def text = zip.getInputStream(fabricEntry).getText('UTF-8')
+                    def json = new groovy.json.JsonSlurper().parseText(text)
+
+                    def mc = json.depends?.minecraft
+                    if (mc == null || mc.toString().isBlank()) {
+                        problems << "${jar.name}: fabric.mod.json 里没有 minecraft 依赖声明"
+                    } else {
+                        def value = mc.toString()
+                        // 两种典型错误：
+                        //   1. 模板没替换 → 留下 ${...}
+                        //   2. 拿了个对象而不是字符串 → provider(?)
+                        if (value.contains('${')) {
+                            problems << "${jar.name}: minecraft 版本占位符没替换掉（${value}）"
+                        }
+                        if (value.contains('provider(') || value.contains('Provider(')) {
+                            problems << "${jar.name}: minecraft 版本被写成了对象而不是字符串（${value}）"
+                        }
+                        // Fabric 不认 Maven 风格的区间语法
+                        if (value.startsWith('[') || value.startsWith('(')) {
+                            problems << ("${jar.name}: Fabric 不支持 Maven 区间语法（${value}），"
+                                    + "要写成具体版本号或 >=x.y.z 这种形式")
+                        }
+                    }
+
+                    def iconEntry = zip.getEntry('assets/douyindanmaku/icon.png')
+                    if (iconEntry == null) {
+                        problems << "${jar.name}: 缺少图标 assets/douyindanmaku/icon.png"
+                    }
+                }
+
+                // ---------- NeoForge ----------
+                def tomlEntry = zip.getEntry('META-INF/neoforge.mods.toml')
+                if (tomlEntry != null) {
+                    def text = zip.getInputStream(tomlEntry).getText('UTF-8')
+                    if (text.contains('${')) {
+                        def leaked = text.readLines().findAll { it.contains('${') }
+                        problems << "${jar.name}: neoforge.mods.toml 里有没替换的占位符：${leaked}"
+                    }
+                    if (!text.contains('versionRange')) {
+                        problems << "${jar.name}: neoforge.mods.toml 里没有 versionRange"
+                    }
+                }
+
+                // ---------- 通用：类文件必须真的打进去了 ----------
+                def hasFabricEntry = zip.getEntry('com/douyindanmaku/fabric/DouyinDanmakuFabric.class') != null
+                def hasNeoEntry = zip.getEntry('com/douyindanmaku/neoforge/DouyinDanmakuNeoForge.class') != null
+                if (!hasFabricEntry && !hasNeoEntry) {
+                    problems << "${jar.name}: 两个加载器的入口类都没有，jar 可能是空的"
+                }
+                if (zip.getEntry('com/douyindanmaku/core/DanmakuSession.class') == null) {
+                    problems << "${jar.name}: 共用核心代码没被打进去"
+                }
+            } finally {
+                zip.close()
+            }
+        }
+
+        if (!problems.isEmpty()) {
+            println ''
+            println '=== jar 元数据自检发现以下问题 ==='
+            problems.each { println "  ✗ ${it}" }
+            println ''
+            throw new GradleException("jar 元数据自检失败（${problems.size()} 个问题）")
+        }
+
+        println ''
+        println "=== jar 元数据自检通过（${jars.length} 个 jar）==="
+        jars.each { println "  ✓ ${it.name}" }
+    }
+}
+
+tasks.named('wrapper') {
+    doLast {
+        println "Gradle wrapper 已生成，分发地址：${distributionUrl}"
+    }
+}
