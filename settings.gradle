@@ -8,10 +8,6 @@ pluginManagement {
             name = 'Forge'
             url = 'https://maven.minecraftforge.net/'
         }
-        maven {
-            name = 'NeoForged'
-            url = 'https://maven.neoforged.net/releases'
-        }
         gradlePluginPortal()
         mavenCentral()
     }
@@ -20,25 +16,17 @@ pluginManagement {
 rootProject.name = 'mc-douyin-danmaku'
 
 // =====================================================================
-//  多版本工程
+//  Minecraft 1.20.1 分支
 //
-//  每个「Minecraft 版本 + 加载器」是一个独立的子项目，各自产出自己的 jar。
-//  它们共用同一份核心代码（common/src/main/java），所以改一个 bug
-//  所有版本一起修好。
+//  这个分支只包含 1.20.1 的两个加载器端，方便只想给 1.20.1 编译的人：
+//  不用下载 1.21.1 那边的依赖。
 //
-//  加一个新版本的做法：复制一份现有的子项目目录，改子项目 gradle.properties
-//  里的版本号，在这里加一行 include 即可。
+//  完整的多版本工程在 main 分支，那边同时有 1.20.1 (Fabric/Forge)
+//  和 1.21.1 (Fabric/NeoForge)。
+//
+//  为什么 1.20.1 没有 NeoForge：
+//  NeoForge 是从 Minecraft 1.20.2 才开始有的，1.20.1 时代只有 Forge。
 // =====================================================================
 
-// ---- Minecraft 1.21.1 ----
-include 'fabric-1.21.1'
-project(':fabric-1.21.1').projectDir = file('fabric')
-
-include 'neoforge-1.21.1'
-project(':neoforge-1.21.1').projectDir = file('neoforge')
-
-// ---- Minecraft 1.20.1 ----
-// 注意：1.20.1 只有 Fabric 和 Forge，没有 NeoForge——
-// NeoForge 的第一个版本是给 Minecraft 1.20.2 的，1.20.1 时代只有 Forge。
 include 'fabric-1.20.1'
 include 'forge-1.20.1'

@@ -1,19 +1,20 @@
 // =====================================================================
 //  根构建脚本
 //  ---------------------------------------------------------------------
-//  多版本工程。每个「Minecraft 版本 + 加载器」是一个子项目：
-//    :fabric-1.21.1    -> Fabric  1.21.1
-//    :neoforge-1.21.1  -> NeoForge 1.21.1
+//  Minecraft 1.20.1 分支。两个子项目：
 //    :fabric-1.20.1    -> Fabric  1.20.1
+//    :forge-1.20.1     -> Forge   1.20.1
 //
-//  所有子项目共用同一份「与加载器无关」的核心代码，
+//  两个子项目共用同一份「与加载器无关」的核心代码，
 //  源码位置在 common/src/main/java，由各子项目的 build.gradle 挂进去。
-//  改一个 bug 所有版本一起修好。
+//
+//  想要 1.21.1（Fabric + NeoForge）或者完整的四个版本，
+//  看 main 分支。
 //
 //  注意：Gradle 的 plugins {} 块不接受属性插值，
-//  所以加载器插件（loom / moddev）的版本必须写在各子项目的 build.gradle
-//  里作为字面量。其余版本号放在各子项目自己的 gradle.properties 里
-//  （因为不同 Minecraft 版本要用不同的 loader / API 版本）。
+//  所以加载器插件（loom / forgegradle）的版本必须写在各子项目的
+//  build.gradle 里作为字面量。其余版本号放在各子项目自己的
+//  gradle.properties 里（因为不同 Minecraft 版本要用不同的 loader 版本）。
 // =====================================================================
 subprojects {
     apply plugin: 'java'
@@ -23,7 +24,7 @@ subprojects {
 
     // 每个子项目自己声明 Java 版本：
     //   Minecraft 1.20.1 -> Java 17
-    //   Minecraft 1.21.1 -> Java 21
+    // （1.20.5 之后的版本才是 Java 21，本分支用不到）
     def projectJavaVersion = (project.findProperty('java.version')
             ?: rootProject.property('java.version')) as int
 
@@ -87,7 +88,7 @@ wrapper {
 // wrapper 任务本身是内置的，所以这个依赖不会造成循环。
 //
 // 注意这里用 allprojects 的 afterEvaluate 自动发现子项目，
-// 而不是写死 :fabric-1.21.1 这类名字——以后加新版本只要改 settings.gradle，
+// 而不是写死 :fabric-1.20.1 这类名字——以后加新版本只要改 settings.gradle，
 // 这个脚本不用动。
 def jarProducerProjects = { ->
     subprojects.findAll { it.tasks.findByName('collectJar') != null }
