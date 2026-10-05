@@ -602,9 +602,47 @@ douyin-danmaku-neoforge-1.21.1-1.0.0.jar
 ./gradlew :neoforge:build
 ```
 
-> Windows 上用 `gradlew.bat`。
-> Gradle 官方分发站在国内经常连不上，`gradle/wrapper/gradle-wrapper.properties`
-> 里的下载地址已经换成腾讯云镜像了。
+### Windows 用户注意
+
+Windows 上有**两个坑**，都会让上面那几条命令跑不起来：
+
+**坑一：`./gradlew` 是 Linux 写法。** `cmd` 和 PowerShell 不认，要用 `gradlew.bat`：
+
+```bat
+gradlew.bat collectJars
+```
+
+（如果你用 **Git Bash**，那 `./gradlew` 是可以的。）
+
+**坑二：必须设置 `JAVA_HOME`。** 光把 `java` 加进 PATH 不够，
+Gradle 需要这个环境变量，否则会报 `JAVA_HOME is not set`。
+
+`cmd` 里临时设置（只对当前窗口有效）：
+
+```bat
+set "JAVA_HOME=C:\Program Files\Microsoft\jdk-21.0.9.10-hotspot"
+gradlew.bat collectJars
+```
+
+PowerShell 里是：
+
+```powershell
+$env:JAVA_HOME = 'C:\Program Files\Microsoft\jdk-21.0.9.10-hotspot'
+.\gradlew.bat collectJars
+```
+
+**想一劳永逸**，把 `JAVA_HOME` 设成系统环境变量：Win 键搜索「环境变量」→
+编辑系统环境变量 → 环境变量 → 新建，变量名 `JAVA_HOME`，
+值是你的 JDK 目录（**不要带 `\bin`**）。
+
+> 怎么找 JDK 目录？在 `cmd` 里执行 `where java`，
+> 输出大概是 `C:\Program Files\Microsoft\jdk-21.0.9.10-hotspot\bin\java.exe`，
+> **去掉结尾的 `\bin\java.exe`** 就是 `JAVA_HOME` 该填的值。
+
+**坑三：首次构建会比较慢。** 要下载 Gradle 发行包、Minecraft、
+以及两个加载器的依赖，视网络情况可能要几分钟到十几分钟。
+Gradle 官方分发站在国内经常连不上，
+`gradle/wrapper/gradle-wrapper.properties` 里的地址已经换成腾讯云镜像了。
 
 构建完会自动跑一次元数据自检（`verifyJars`），检查两个 jar 里的
 `fabric.mod.json` / `neoforge.mods.toml` 对不对——比如版本号合不合法、
