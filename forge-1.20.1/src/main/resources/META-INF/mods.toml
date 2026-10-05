@@ -1,0 +1,26 @@
+modLoader = "javafml"
+loaderVersion = "${forgeRange}"
+license = "${modLicense}"
+
+[[mods]]
+modId = "douyindanmaku"
+version = "${version}"
+displayName = "${modName}"
+authors = "${modAuthors}"
+description = '''
+${modDescription}
+'''
+
+[[dependencies.douyindanmaku]]
+modId = "forge"
+mandatory = true
+versionRange = "${forgeRange}"
+ordering = "NONE"
+side = "CLIENT"
+
+[[dependencies.douyindanmaku]]
+modId = "minecraft"
+mandatory = true
+versionRange = "${minecraftRange}"
+ordering = "NONE"
+side = "CLIENT"

@@ -2,7 +2,7 @@
 
 把**抖音直播间的弹幕**实时搬到 Minecraft 聊天栏里。开播的时候不用再拿手机、也不用另开个窗口盯着，游戏里直接就是弹幕姬。
 
-支持 **Minecraft 1.21.1**，Fabric 和 NeoForge 两个版本都有。
+支持 **Minecraft 1.20.1 和 1.21.1**，Fabric / NeoForge / Forge 三个加载器都有对应版本。
 
 > 这个项目的灵感来自 [BakaDanmaku](https://github.com/TartaricAcid/BakaDanmaku)（B 站弹幕，最早把「弹幕进聊天栏」这条路走通的）和 [DanmuFree](https://github.com/SoraYjy/DanmuFree)（抖音弹幕抓取客户端，抖音协议的实现思路来自它）。详见文末「致谢与开源说明」。
 
@@ -49,16 +49,32 @@
 
 ### 第一步：装模组
 
-1. 先确认你的游戏是 **Minecraft 1.21.1**
-2. 去仓库的 **Releases** 页面，下载对应加载器的 jar：
-   - Fabric 用户拿 `douyin-danmaku-fabric-1.21.1-1.0.0.jar`
-   - NeoForge 用户拿 `douyin-danmaku-neoforge-1.21.1-1.0.0.jar`
+1. 先确认你的 **Minecraft 版本**和**加载器**（见下面的表格）
+2. 去仓库的 **Releases** 页面，下载对应的 jar
 3. 丢进 `.minecraft/mods` 文件夹
 
-> 想自己编译也行，见[自己编译](#自己编译)。
+| 你的游戏 | 下载这个 | 还要装什么 |
+|---|---|---|
+| Minecraft **1.20.1** + Fabric | `douyin-danmaku-fabric-1.20.1-1.0.0.jar` | [Fabric API](https://modrinth.com/mod/fabric-api) |
+| Minecraft **1.20.1** + Forge | `douyin-danmaku-forge-1.20.1-1.0.0.jar` | 不用 |
+| Minecraft **1.21.1** + Fabric | `douyin-danmaku-fabric-1.21.1-1.0.0.jar` | [Fabric API](https://modrinth.com/mod/fabric-api) |
+| Minecraft **1.21.1** + NeoForge | `douyin-danmaku-neoforge-1.21.1-1.0.0.jar` | 不用 |
 
-> **Fabric 用户注意**：还得装 [Fabric API](https://modrinth.com/mod/fabric-api)。
-> NeoForge 不用额外前置。
+**文件名里的版本号就是对应的 Minecraft 版本**，照着挑就不会错。
+
+为什么没有别的组合（不是偷懒，是上游就没有）：
+
+| Minecraft | Fabric | NeoForge | Forge |
+|---|---|---|---|
+| 1.21.1 | 有 | 有 | 无 |
+| 1.20.1 | 有 | 无 | 有 |
+
+- **1.20.1 没有 NeoForge**：NeoForge 是 Forge 分家出来的，
+  第一个版本给的是 Minecraft 1.20.2。
+- **1.21.1 没有 Forge**：1.20.2 之后两者分道扬镳，
+  新版本主流是 NeoForge，Forge 基本停在 1.20.1。
+
+> 想自己编译也行，见[自己编译](#自己编译)。
 
 模组是**纯客户端**的，服务端不用装（装了也没用）。
 
@@ -573,8 +589,10 @@
   自己带的 Netty 版本打架——这是很常见的模组崩溃原因。
 - **不用 Mixin**。整个模组没有一处字节码注入，兼容性好，
   也不会因为 Minecraft 版本更新就崩。
-- **两个加载器共用同一份核心代码**，只有「怎么注册事件、怎么发聊天消息」
-  这些跟加载器有关的部分才写两份。
+- **三个加载器共用同一份核心代码**，只有「怎么注册事件、怎么发聊天消息」
+  这些跟加载器有关的部分才分开写。所以加版本、修 bug 都只改一处。
+- **不用 Mixin**。这一点在多模组环境下很重要：Mixin 是往游戏类里插代码，
+  同一个类被好几个模组改的时候很容易互相打架。本模组完全不碰这条路。
 
 ---
 
@@ -582,25 +600,62 @@
 
 需要 **JDK 21**。
 
+> 只编译 Fabric 和 NeoForge 的话，到这一步就够了。
+> 要连 Forge 1.20.1 一起编译，还需要一个 **JDK 17**，见下面「关于 JDK 17」。
+
 ```bash
 git clone https://github.com/ASUKA2150/mc-douyin-danmaku.git
 cd mc-douyin-danmaku
 ./gradlew collectJars
 ```
 
-产物在 `build/libs/`：
+产物在 `build/libs/`，一次出四个：
 
 ```
+douyin-danmaku-fabric-1.20.1-1.0.0.jar
 douyin-danmaku-fabric-1.21.1-1.0.0.jar
+douyin-danmaku-forge-1.20.1-1.0.0.jar
 douyin-danmaku-neoforge-1.21.1-1.0.0.jar
 ```
 
-只想编译其中一个：
+只想编译其中一个（子项目名就是目录名，但 `fabric/` 对应 `:fabric-1.21.1`）：
 
 ```bash
-./gradlew :fabric:build
-./gradlew :neoforge:build
+./gradlew :fabric-1.20.1:build
+./gradlew :forge-1.20.1:build
+./gradlew :neoforge-1.21.1:build
 ```
+
+### 关于 JDK 17
+
+**为什么需要两个 JDK**：Fabric 和 NeoForge 的构建插件都认 JDK 21，
+但 Forge 1.20.1 用的 ForgeGradle 本身跑在 Java 17 上——这是它写死的，
+不是我们能选的。
+
+**Gradle 不一定能自己找到 JDK 17。** 它只会在几个固定位置找
+（当前 JVM、`JAVA_HOME`、Windows 注册表、PATH），装在别处就找不到，
+报错长这样：
+
+```
+Cannot find a Java installation matching languageVersion=17
+```
+
+**解决办法**：在你的**用户级**配置文件里告诉 Gradle 路径。
+这个文件不在仓库里，只对你本机生效，不会影响别人：
+
+```
+Windows      C:\Users\<你的用户名>\.gradle\gradle.properties
+Linux/macOS  ~/.gradle/gradle.properties
+```
+
+里面写一行（多个 JDK 用逗号隔开，**用正斜杠**）：
+
+```properties
+org.gradle.java.installations.paths=C:/Program Files/Microsoft/jdk-17.0.13.11-hotspot
+```
+
+不想改文件也行，把 `JAVA_HOME` 指向 JDK 17 再执行构建即可。
+或者干脆只编译其它三个模块，跳过 Forge。
 
 ### Windows 用户注意
 
@@ -614,8 +669,8 @@ gradlew.bat collectJars
 
 （如果你用 **Git Bash**，那 `./gradlew` 是可以的。）
 
-**坑二：必须设置 `JAVA_HOME`。** 光把 `java` 加进 PATH 不够，
-Gradle 需要这个环境变量，否则会报 `JAVA_HOME is not set`。
+**坑二：建议设置 `JAVA_HOME`。** 光把 `java` 加进 PATH 不够，
+Gradle 需要这个环境变量，否则可能报 `JAVA_HOME is not set`。
 
 `cmd` 里临时设置（只对当前窗口有效）：
 
@@ -640,14 +695,40 @@ $env:JAVA_HOME = 'C:\Program Files\Microsoft\jdk-21.0.9.10-hotspot'
 > **去掉结尾的 `\bin\java.exe`** 就是 `JAVA_HOME` 该填的值。
 
 **坑三：首次构建会比较慢。** 要下载 Gradle 发行包、Minecraft、
-以及两个加载器的依赖，视网络情况可能要几分钟到十几分钟。
+以及三个加载器的依赖，视网络情况可能要几分钟到十几分钟。
 Gradle 官方分发站在国内经常连不上，
 `gradle/wrapper/gradle-wrapper.properties` 里的地址已经换成腾讯云镜像了。
 
-构建完会自动跑一次元数据自检（`verifyJars`），检查两个 jar 里的
-`fabric.mod.json` / `neoforge.mods.toml` 对不对——比如版本号合不合法、
-模板占位符有没有都替换掉、图标和入口类是不是真的打进 jar 了。
-这类毛病在构建阶段根本看不出来，只有装进游戏才会暴露，所以提前拦住。
+**坑四：编译 Forge 时可能遇到证书报错。**
+
+```
+Failed to validate certificate for host 'https://maven.minecraftforge.net/'
+```
+
+这是 ForgeGradle 启动时自己多做的一次证书校验。国内不少网络
+（以及某些杀毒软件、公司代理）会做 TLS 中间人，导致它失败。
+`gradle.properties` 里已经加了这个开关绕过去：
+
+```properties
+systemProp.net.minecraftforge.gradle.check.certs=false
+```
+
+它只影响这一次额外的连通性检查，不影响 Gradle 自己下载依赖时的证书校验。
+如果你在墙外、或者没遇到这个问题，把那行删掉就行。
+
+构建完会自动跑一次元数据自检（`verifyJars`），检查**四个** jar 里的
+`fabric.mod.json` / `mods.toml` / `neoforge.mods.toml` / `pack.mcmeta`
+对不对，包括：
+
+- 模板占位符有没有都替换掉（漏了会让游戏加载失败）
+- `license` 字段在不在（Forge 把它列为必填，缺了会**拒绝加载整个模组包**）
+- 依赖的版本区间合不合法，以及**和 jar 文件名里的 MC 版本是否一致**
+- `pack.mcmeta` 在不在、`pack_format` 有没有值
+  （Forge / NeoForge 会把模组当资源包加载，缺了会报 ResourcePackInfo 错误）
+- 图标和入口类是不是真的打进 jar 了
+
+这类毛病在构建阶段完全看不出来，只有装进游戏才暴露，而且报错往往很绕，
+所以提前拦住。这几条检查都是踩过坑之后补上的。
 
 ### 代码结构
 
@@ -670,12 +751,61 @@ mc-douyin-danmaku/
 │       ├── proto/                   手写的 protobuf 读取器
 │       ├── source/                  其它数据源（TCP）
 │       └── text/                    过滤与渲染
-├── fabric/                        ← Fabric 端（约 380 行）
-└── neoforge/                      ← NeoForge 端（约 370 行）
+├── fabric/                        ← Fabric 1.21.1 端（约 435 行）
+├── fabric-1.20.1/                 ← Fabric 1.20.1 端（和上面逐字节相同）
+├── neoforge/                      ← NeoForge 1.21.1 端（约 426 行）
+└── forge-1.20.1/                  ← Forge 1.20.1 端（约 458 行）
 ```
 
-`common` 里的代码**不允许 import 任何 Fabric / NeoForge / Minecraft 的类**，
-这样它才能被两个加载器共用。这条约定靠 `build.gradle` 里的注释和代码审查保证。
+> 目录名和 Gradle 子项目名不完全对应（`fabric/` 对应子项目
+> `:fabric-1.21.1`），映射关系写在 `settings.gradle` 里。
+
+`common` 里的代码**不允许 import 任何 Fabric / NeoForge / Forge / Minecraft 的类**，
+这样它才能被所有版本共用。这条约定靠 `build.gradle` 里的注释和代码审查保证。
+
+那四个加载器端的代码里，真正碰 Minecraft 的只有十几个方法调用，
+而且这些 API 在 1.20.1 到 1.21.4 之间**一个都没变**——所以换版本时
+适配层几乎不用改，这也是多版本工程能维持下去的原因。
+
+### 支持矩阵
+
+Minecraft 版本和加载器的组合并不是任意的，实际情况是：
+
+| Minecraft | Fabric | NeoForge | Forge |
+|---|---|---|---|
+| 1.21.1 | 有 | 有 | — |
+| 1.20.1 | 有 | — | 有 |
+
+两个「—」的原因：
+
+- **1.20.1 没有 NeoForge。** NeoForge 是 Forge 分家出来的，第一个版本是给
+  Minecraft 1.20.2 的。1.20.1 时代只有 Forge。
+- **1.21.1 没有 Forge。** 1.20.2 之后 Forge 和 NeoForge 分道扬镳，
+  新版本的主流是 NeoForge，Forge 基本停在 1.20.1 那条线。
+
+### 加一个新 Minecraft 版本
+
+因为核心代码（5500 多行，占整个项目的 80%）完全不依赖 Minecraft，
+加新版本的成本很低，步骤是：
+
+1. 复制一个现有的子项目目录，比如把 `fabric-1.20.1/` 复制成 `fabric-1.20.4/`
+2. 改新目录里 `gradle.properties` 的版本号：
+   `minecraft.version`、`java.version`（1.20.5 起才是 21）、以及加载器相关版本
+3. 改新目录里 `pack.mcmeta` 的 `pack_format`
+   （每个 MC 版本都不一样，填错不影响功能，但资源包页会提示版本不符）
+4. 在 `settings.gradle` 里加一行 `include 'fabric-1.20.4'`
+5. 编译，修可能的 API 差异
+
+前四步基本是机械操作，真正的工作量在第五步。不过从实测看，
+本文用到的那些 Minecraft API 从 1.20.1 到 1.21.4 都没变过，
+所以第五步往往也是空的。
+
+根 `build.gradle` 里的 `collectJars` / `verifyJars` 会**自动发现**所有子项目，
+不用改。自检还会核对「jar 文件名里的 MC 版本」和「元数据里声明的版本」是否一致，
+防止复制子项目时忘了改版本号。
+
+**但要先确认加载器本身支持那个 MC 版本。** 这不是代码问题，是上游的现实：
+NeoForge 没有 1.20.1，Forge 没有 1.21.1，加之前先查一下。
 
 ### 开发者自检
 

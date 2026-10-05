@@ -1,16 +1,19 @@
 // =====================================================================
 //  根构建脚本
 //  ---------------------------------------------------------------------
-//  这个仓库同时产出两个加载器的 jar：
-//    :fabric   -> Fabric 1.21.1
-//    :neoforge -> NeoForge 1.21.1
+//  多版本工程。每个「Minecraft 版本 + 加载器」是一个子项目：
+//    :fabric-1.21.1    -> Fabric  1.21.1
+//    :neoforge-1.21.1  -> NeoForge 1.21.1
+//    :fabric-1.20.1    -> Fabric  1.20.1
 //
-//  两个子项目共用同一份「与加载器无关」的核心代码，
+//  所有子项目共用同一份「与加载器无关」的核心代码，
 //  源码位置在 common/src/main/java，由各子项目的 build.gradle 挂进去。
+//  改一个 bug 所有版本一起修好。
 //
 //  注意：Gradle 的 plugins {} 块不接受属性插值，
 //  所以加载器插件（loom / moddev）的版本必须写在各子项目的 build.gradle
-//  里作为字面量。其余版本号统一放在根 gradle.properties。
+//  里作为字面量。其余版本号放在各子项目自己的 gradle.properties 里
+//  （因为不同 Minecraft 版本要用不同的 loader / API 版本）。
 // =====================================================================
 subprojects {
     apply plugin: 'java'
@@ -18,21 +21,46 @@ subprojects {
     version = rootProject.property('mod.version')
     group = rootProject.property('mod.group')
 
+    // 每个子项目自己声明 Java 版本：
+    //   Minecraft 1.20.1 -> Java 17
+    //   Minecraft 1.21.1 -> Java 21
+    def projectJavaVersion = (project.findProperty('java.version')
+            ?: rootProject.property('java.version')) as int
+
     java {
-        // Minecraft 1.21.1 使用 Java 21
-        toolchain {
-            languageVersion = JavaLanguageVersion.of(rootProject.property('java.version') as int)
-        }
+        // 注意这里【故意不配 toolchain】。
+        //
+        // 配了 toolchain 的话，Gradle 会要求机器上装齐每一个目标 JDK
+        // （编译 1.20.1 要 JDK 17、编译 1.21.1 要 JDK 21），
+        // 否则直接报 "Cannot find a Java installation matching languageVersion=17"。
+        // 对只是想编译一下的人来说，为了一个模组装两个 JDK 太折腾。
+        //
+        // 改成「用当前 JDK 编译，但字节码目标降到目标版本」——
+        // 靠下面的 options.release 实现。JDK 21 的 javac 完全可以
+        // 产出 Java 17 的字节码，而且 --release 会同时限制可用的 API
+        // 到 Java 17 的范围，不会误用高版本 API。
         withSourcesJar()
     }
 
     tasks.withType(JavaCompile).configureEach {
         // 保持 UTF-8，避免中文注释 / 中文模板在 Windows 上乱码
         options.encoding = 'UTF-8'
-        options.release = rootProject.property('java.version') as int
+        // 关键：产出目标版本的字节码，并限制只能用那个版本的 API
+        options.release = projectJavaVersion
     }
 
     repositories {
+        // 国内镜像放最前面。
+        //
+        // 为什么：Maven 中央仓库和 Mojang 的库在国内经常连不上，
+        // 而且不只慢——实测会碰到 DNS 污染（证书里的域名和实际 IP 对不上，
+        // 报 "Certificate ... doesn't match any of the subject alternative names"）。
+        // 阿里云的公共仓库是这几个上游的完整镜像，命中率很高。
+        //
+        // 想用官方源的话把这两行删掉即可。
+        maven { name = 'AliyunPublic'; url = 'https://maven.aliyun.com/repository/public' }
+        maven { name = 'AliyunCentral'; url = 'https://maven.aliyun.com/repository/central' }
+
         mavenCentral()
         maven { name = 'Fabric';       url = 'https://maven.fabricmc.net/' }
         maven { name = 'NeoForged';    url = 'https://maven.neoforged.net/releases' }
@@ -57,15 +85,103 @@ wrapper {
 
 // 让 `gradlew build` 在没有 wrapper 文件时也能自举：
 // wrapper 任务本身是内置的，所以这个依赖不会造成循环。
+//
+// 注意这里用 allprojects 的 afterEvaluate 自动发现子项目，
+// 而不是写死 :fabric-1.21.1 这类名字——以后加新版本只要改 settings.gradle，
+// 这个脚本不用动。
+def jarProducerProjects = { ->
+    subprojects.findAll { it.tasks.findByName('collectJar') != null }
+}
+
 tasks.register('collectJars') {
     group = 'build'
-    description = '构建两个加载器的 jar，并收集到根目录 build/libs'
-    dependsOn ':fabric:collectJar', ':neoforge:collectJar'
+    description = '构建所有版本的 jar，并收集到根目录 build/libs'
+    dependsOn { jarProducerProjects().collect { "${it.path}:collectJar" } }
     finalizedBy 'verifyJars'
 }
 
 // ---------------------------------------------------------------------
-//  打包后自检：检查两个 jar 的元数据文有没有被模板替换搞坏
+//  从 TOML 元数据里核对 Minecraft 版本区间
+//
+//  为什么需要：多版本工程里最隐蔽的错误是「引用错了版本区间」。
+//  踩过这个坑——Forge 1.20.1 的子项目从根 gradle.properties 拿了
+//  NeoForge 1.21.1 的区间，结果产出的 jar 里写着「需要 Minecraft 1.21.1」，
+//  装到 1.20.1 上直接被拒绝加载，而报错信息完全看不出是打包时写错了。
+//
+//  判断办法：jar 文件名里带 MC 版本（douyin-danmaku-forge-1.20.1-1.0.0.jar），
+//  拿它去和元数据里 minecraft 那条依赖的 versionRange 对照，
+//  看这个版本是否落在区间里。
+//
+//  实现说明：版本比较逻辑内联在这里，没有抽成单独函数——
+//  Gradle 脚本里 def 出来的函数在闭包内调用时作用域会跑到 project 上，
+//  报 "Could not find method ... on root project"。
+// ---------------------------------------------------------------------
+def checkMinecraftRangeInToml = { String jarName, String tomlText ->
+    def found = []
+
+    // jar 文件名里的 MC 版本，例如 -1.20.1-
+    def nameVersionMatcher = (jarName =~ /-(\d+\.\d+(?:\.\d+)?)-\d/)
+    if (!nameVersionMatcher.find()) {
+        return found
+    }
+    def nameVersion = nameVersionMatcher.group(1)
+
+    // 把 "1.20.1" 拆成 [1,20,1] 便于逐段比较
+    def parseVersion = { String v ->
+        v.tokenize('.').collect { (it.replaceAll(/\D.*$/, '') ?: '0') as int }
+    }
+    // 返回负数表示 a < b
+    def cmp = { String a, String b ->
+        def pa = parseVersion(a)
+        def pb = parseVersion(b)
+        int len = Math.max(pa.size(), pb.size())
+        for (int i = 0; i < len; i++) {
+            int va = i < pa.size() ? pa[i] : 0
+            int vb = i < pb.size() ? pb[i] : 0
+            if (va != vb) {
+                return va <=> vb
+            }
+        }
+        return 0
+    }
+
+    // 找到 modId = "minecraft" 那一段之后紧跟的 versionRange
+    def lines = tomlText.readLines()
+    for (int i = 0; i < lines.size(); i++) {
+        if (!lines[i].trim().startsWith('modId = "minecraft"')) {
+            continue
+        }
+        for (int j = i; j < Math.min(i + 6, lines.size()); j++) {
+            def rangeMatcher = (lines[j] =~ /versionRange\s*=\s*"([^"]+)"/)
+            if (!rangeMatcher.find()) {
+                continue
+            }
+            def range = rangeMatcher.group(1)
+            // 解析 [1.20.1,1.20.2) 这种 Maven 区间
+            def bounds = (range =~ /^([\[(])([^,]+),([^)\]]+)([\]\)])$/)
+            if (bounds.find()) {
+                def low = bounds.group(2).trim()
+                def high = bounds.group(3).trim()
+                boolean lowOk = bounds.group(1) == '['
+                        ? cmp(nameVersion, low) >= 0
+                        : cmp(nameVersion, low) > 0
+                boolean highOk = bounds.group(4) == ']'
+                        ? cmp(nameVersion, high) <= 0
+                        : cmp(nameVersion, high) < 0
+                if (!(lowOk && highOk)) {
+                    found << ("${jarName}: 元数据里的 Minecraft 区间（${range}）"
+                            + "不包含文件名标称的版本（${nameVersion}）")
+                }
+            }
+            break
+        }
+        break
+    }
+    return found
+}
+
+// ---------------------------------------------------------------------
+//  打包后自检：检查所有 jar 的元数据文有没有被模板替换搞坏
 //
 //  为什么需要这个：元数据里的问题（版本号写错、模板占位符没替掉）
 //  在构建阶段完全看不出来，只有真人把 jar 装进游戏才会暴露，
@@ -76,7 +192,7 @@ tasks.register('collectJars') {
 tasks.register('verifyJars') {
     group = 'verification'
     description = '检查打好的 jar 里元数据是否正确（版本号、占位符、图标）'
-    dependsOn ':fabric:collectJar', ':neoforge:collectJar'
+    dependsOn { jarProducerProjects().collect { "${it.path}:collectJar" } }
 
     def libsDir = layout.buildDirectory.dir('libs')
     def rootName = rootProject.name
@@ -124,9 +240,71 @@ tasks.register('verifyJars') {
                     if (iconEntry == null) {
                         problems << "${jar.name}: 缺少图标 assets/douyindanmaku/icon.png"
                     }
+
+                    // 依赖声明里不能出现畸形的运算符组合，比如 ">=>=0.14.22"。
+                    // 这种错误来自「配置里写了 >= 前缀、代码里又补了一遍」，
+                    // 生成的元数据看起来就是坏的。踩过一次，加个检查。
+                    ['fabricloader', 'fabric-api', 'minecraft', 'java'].each { depKey ->
+                        def v = json.depends?.get(depKey)?.toString() ?: ''
+                        if (v.contains('>=>=') || v.contains('<=<=') || v.contains('===')) {
+                            problems << "${jar.name}: 依赖 ${depKey} 的版本声明畸形（${v}）"
+                        }
+                    }
+
+                    // fabricloader 的要求【必须带运算符】。
+                    // 写成裸版本号（如 "0.14.22"）会被 Fabric 理解成
+                    // 「必须正好是 0.14.22」——装了更新版本的人反而报错，
+                    // 和「放宽要求」的目的正好相反。踩过这个坑。
+                    def loaderReq = json.depends?.fabricloader?.toString() ?: ''
+                    if (loaderReq && !loaderReq.startsWith('>') && !loaderReq.startsWith('<')
+                            && !loaderReq.startsWith('=') && loaderReq != '*') {
+                        problems << ("${jar.name}: fabricloader 要求缺运算符（${loaderReq}），"
+                                + "会被理解成「必须正好是这个版本」，应写成 >=${loaderReq}")
+                    }
+
+                    // 文件名里的 MC 版本必须和元数据里声明的一致。
+                    // 多版本工程最容易出的错就是「复制了 1.20.1 的子项目、
+                    // 忘了改 minecraft.version」，结果产出一个
+                    // 名字写着 1.21.1、实际给 1.20.1 用的 jar。
+                    def nameVersion = (jar.name =~ /-(\d+\.\d+(?:\.\d+)?)-\d/).with { it.find() ? it.group(1) : null }
+                    if (nameVersion != null && !nameVersion.equals(mc.toString())) {
+                        problems << ("${jar.name}: 文件名里的 MC 版本（${nameVersion}）"
+                                + "和元数据声明的（${mc}）不一致")
+                    }
                 }
 
-                // ---------- NeoForge ----------
+                // ---------- Forge（1.20.1）----------
+                // 注意文件名是 mods.toml，不是 neoforge.mods.toml；
+                // 而且 Forge 1.20.1 的键名是 PascalCase（modId / versionRange）。
+                def forgeTomlEntry = zip.getEntry('META-INF/mods.toml')
+                if (forgeTomlEntry != null) {
+                    def text = zip.getInputStream(forgeTomlEntry).getText('UTF-8')
+                    if (text.contains('${')) {
+                        def leaked = text.readLines().findAll { it.contains('${') }
+                        problems << "${jar.name}: mods.toml 里有没替换的占位符：${leaked}"
+                    }
+                    if (!text.contains('versionRange')) {
+                        problems << "${jar.name}: mods.toml 里没有 versionRange"
+                    }
+                    if (!text.contains('modId = "douyindanmaku"')) {
+                        problems << "${jar.name}: mods.toml 里的 modId 不是 douyindanmaku"
+                    }
+                    // license 是 Forge 的【必填项】。
+                    //
+                    // 漏了它的后果不是「少显示一行信息」，而是整个游戏起不来：
+                    //     net.minecraftforge.fml.ModLoadingException:
+                    //       Missing License Information in file Mod File: ...
+                    // 而且报错发生在模组发现阶段，模组构造函数根本不会执行，
+                    // 所以用户看不到任何自己的日志，极难定位。踩过这个坑。
+                    if (!(text =~ /(?m)^\s*license\s*=/)) {
+                        problems << ("${jar.name}: mods.toml 缺少 license 字段。"
+                                + "Forge 会因此拒绝加载整个模组包，"
+                                + "报 Missing License Information")
+                    }
+                    problems.addAll(checkMinecraftRangeInToml(jar.name, text))
+                }
+
+                // ---------- NeoForge（1.21.1）----------
                 def tomlEntry = zip.getEntry('META-INF/neoforge.mods.toml')
                 if (tomlEntry != null) {
                     def text = zip.getInputStream(tomlEntry).getText('UTF-8')
@@ -137,16 +315,43 @@ tasks.register('verifyJars') {
                     if (!text.contains('versionRange')) {
                         problems << "${jar.name}: neoforge.mods.toml 里没有 versionRange"
                     }
+                    problems.addAll(checkMinecraftRangeInToml(jar.name, text))
                 }
 
                 // ---------- 通用：类文件必须真的打进去了 ----------
                 def hasFabricEntry = zip.getEntry('com/douyindanmaku/fabric/DouyinDanmakuFabric.class') != null
                 def hasNeoEntry = zip.getEntry('com/douyindanmaku/neoforge/DouyinDanmakuNeoForge.class') != null
-                if (!hasFabricEntry && !hasNeoEntry) {
-                    problems << "${jar.name}: 两个加载器的入口类都没有，jar 可能是空的"
+                def hasForgeEntry = zip.getEntry('com/douyindanmaku/forge/DouyinDanmakuForge.class') != null
+                if (!hasFabricEntry && !hasNeoEntry && !hasForgeEntry) {
+                    problems << "${jar.name}: 三个加载器的入口类都没有，jar 可能是空的"
                 }
                 if (zip.getEntry('com/douyindanmaku/core/DanmakuSession.class') == null) {
                     problems << "${jar.name}: 共用核心代码没被打进去"
+                }
+
+                // ---------- pack.mcmeta ----------
+                // Forge / NeoForge 会把模组当成一个资源包加载。
+                // 少了 pack.mcmeta 会导致：
+                //     「文件 ... 未能加载有效的 ResourcePackInfo」
+                //     latest.log 里出现 Missing metadata in pack mod:douyindanmaku
+                //
+                // 这个文件很容易漏，因为 Fabric 侧根本不需要它，
+                // 而它是放在 resources 根目录、不打进 jar 顶层就无效。
+                // 图标在 assets/ 下，所以这里只查根目录。
+                def packMeta = zip.getEntry('pack.mcmeta')
+                if (zip.getEntry('META-INF/mods.toml') != null
+                        || zip.getEntry('META-INF/neoforge.mods.toml') != null) {
+                    if (packMeta == null) {
+                        problems << ("${jar.name}: 缺少 pack.mcmeta。"
+                                + "Forge / NeoForge 会报「未能加载有效的 ResourcePackInfo」，"
+                                + "日志里是 Missing metadata in pack")
+                    } else {
+                        def metaText = zip.getInputStream(packMeta).getText('UTF-8')
+                        def metaJson = new groovy.json.JsonSlurper().parseText(metaText)
+                        if (metaJson?.pack?.pack_format == null) {
+                            problems << "${jar.name}: pack.mcmeta 里没有 pack_format"
+                        }
+                    }
                 }
             } finally {
                 zip.close()
