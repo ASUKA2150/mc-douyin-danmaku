@@ -1,0 +1,159 @@
+// =====================================================================
+//  Forge / Minecraft 1.21.1 子项目
+//
+//  这个子项目和 forge-1.20.1/ 的差别比想象中小：
+//
+//    相同：构建插件（ForgeGradle 6）、元数据文件名（META-INF/mods.toml）、
+//          官方 Mojang 映射、以及 common/ 那 5500 行核心代码
+//
+//    不同：只有两处
+//      1. 版本号（Java 21 而不是 17，Forge build 号 52.x 而不是 47.x）
+//      2. 每 tick 事件的写法——1.21.1 多了 Pre/Post 子类
+//         （见 DouyinDanmakuForge 里的注释）
+//
+//  为什么 Forge 不能照抄 NeoForge 那份：
+//    NeoForge 1.21.1 -> net.neoforged.moddev（ModDevGradle）
+//                       META-INF/neoforge.mods.toml，键名 snake_case
+//    Forge    1.21.1 -> net.minecraftforge.gradle（ForgeGradle 6）
+//                       META-INF/mods.toml，键名和 1.20.1 一样
+//
+//  但【映射是同一个】：Forge 和 NeoForge 都用官方 Mojang 映射，
+//  所以 common/src/main/java 可以原样复用，
+//  ChatRenderer 里碰 Minecraft 的那几行也几乎一样。
+// =====================================================================
+
+plugins {
+    // ForgeGradle 6 是 Forge 的官方构建插件，1.21.1 也用它。
+    // 版本必须是字面量（plugins {} 块不支持属性插值）。
+    //
+    // 为什么不用更新的 ModDevGradle 2.x：
+    // 它的 legacyforge 模式会去 maven.neoforged.net 下载 neoform-runtime，
+    // 那个构件在国内下不下来（实测 Gradle 也拿不到），
+    // 而且没有任何镜像提供。ForgeGradle 6 只用 maven.minecraftforge.net。
+    id 'net.minecraftforge.gradle' version '6.0.54'
+}
+
+def mcVersion = project.property('minecraft.version')
+def forgeVersion = project.property('forge.version')
+def forgeVersionRange = project.property('forge.version_range')
+def javaVersion = (project.findProperty('java.version')
+        ?: rootProject.property('java.version')) as int
+
+// Minecraft 版本区间。
+//
+// 【必须从本子项目拿，不能从根 gradle.properties 拿】
+// 根里那个 minecraft.version_range 是给 Fabric / NeoForge 用的；
+// Forge 这边要的是同样的区间语义但独立取值。
+// 踩过这个坑：forge-1.20.1 一开始复用了根里的值，产出的 jar 写着
+// 「需要 Minecraft 1.21.1」，装到 1.20.1 上直接被拒绝加载，
+// 而且报错信息完全看不出是打包时写错了。
+def minecraftRange = project.property('minecraft.version_range')
+
+base {
+    archivesName = "douyin-danmaku-forge-${mcVersion}"
+}
+
+// 用当前 JDK 编译，字节码目标按子项目声明的 Java 版本降级
+// （1.21.1 是 21，1.20.1 是 17）。
+// 不配 toolchain 是为了让只想编译的人不用装多个 JDK。
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release = javaVersion
+}
+
+// ---------------------------------------------------------------------
+//  共用核心源码
+//  common/src/main/java 里的代码所有版本完全一样，在这里直接挂进源码集。
+//  它只允许依赖 JDK 与 Gson（Minecraft 自带），
+//  不允许 import 任何 Fabric / NeoForge / Forge / Minecraft 的类。
+//  以后加新文件不需要改这里的配置。
+// ---------------------------------------------------------------------
+sourceSets {
+    main {
+        java {
+            srcDir rootProject.file('common/src/main/java')
+        }
+        resources {
+            srcDir rootProject.file('common/src/main/resources')
+        }
+    }
+}
+
+minecraft {
+    // 官方 Mojang 映射。
+    //
+    // 关键：这样写才能和 NeoForge / Fabric 两边共用同一份核心代码——
+    // 三边编译出来的 Minecraft 类名、方法名完全一致
+    // （都是 net.minecraft.client.Minecraft.getInstance() 这种）。
+    //
+    // ForgeGradle 支持 official 这个 channel（实测 6.0.54 可用），
+    // 它会自己把官方映射转成 SRG 做重混淆。
+    mappings channel: 'official', version: mcVersion
+}
+
+repositories {
+    mavenCentral()
+    maven { name = 'Forge'; url = 'https://maven.minecraftforge.net/' }
+}
+
+dependencies {
+    minecraft "net.minecraftforge:forge:${forgeVersion}"
+}
+
+// ---------------------------------------------------------------------
+//  元数据模板替换
+//
+//  注意 Forge 的元数据格式和 NeoForge 不同：
+//    - 文件名是 META-INF/mods.toml（NeoForge 是 neoforge.mods.toml）
+//    - 键名是 PascalCase（modId / versionRange / displayName）
+//    - 没有 loaderVersion 这个字段
+//
+//  好在 1.21.1 和 1.20.1 的 Forge 元数据格式是一样的
+//  （实测 1.21.1 的 Forge 自带 jar 里也是 META-INF/mods.toml），
+//  所以这个文件和 forge-1.20.1 那份完全相同。
+// ---------------------------------------------------------------------
+def expandProps = [
+        version        : project.version,
+        modName        : rootProject.property('mod.name'),
+        modDescription : rootProject.property('mod.description'),
+        modAuthors     : rootProject.property('mod.authors'),
+        modLicense     : rootProject.property('mod.license'),
+        minecraftRange : minecraftRange,
+        forgeRange     : forgeVersionRange,
+]
+
+processResources {
+    inputs.properties(expandProps)
+    filesMatching('META-INF/mods.toml') {
+        expand(expandProps)
+    }
+}
+
+jar {
+    def licenseFile = rootProject.file('LICENSE')
+    if (licenseFile.exists()) {
+        from(licenseFile) {
+            rename { "LICENSE_${rootProject.name}" }
+        }
+    }
+}
+
+// ---------------------------------------------------------------------
+//  把 jar 收拢到根目录 build/libs，方便直接拿
+//
+//  注意这里【没有 reobfJar】——实测 Forge 1.21.1 不需要重混淆：
+//  Forge 从 1.20.2 起运行时直接接受官方 Mojang 映射名，所以
+//  ForgeGradle 干脆不给 1.21.1 建 reobfJar 这个任务
+//  （`gradlew :forge-1.21.1:tasks --all` 里搜不到它）。
+//
+//  实测对比：
+//      forge-1.20.1 的 jar -> Minecraft.m_91087_()   （SRG 名，必须重混淆）
+//      forge-1.21.1 的 jar -> Minecraft.getInstance()（官方名，直接能用）
+//
+//  所以这个子项目的流程和 neoforge-1.21.1 一样，直接拿 jar 任务的产物。
+// ---------------------------------------------------------------------
+tasks.register('collectJar', Copy) {
+    dependsOn tasks.named('jar')
+    from tasks.named('jar').flatMap { it.archiveFile }
+    into rootProject.layout.buildDirectory.dir('libs')
+}

@@ -5,6 +5,10 @@ pluginManagement {
             url = 'https://maven.fabricmc.net/'
         }
         maven {
+            name = 'Forge'
+            url = 'https://maven.minecraftforge.net/'
+        }
+        maven {
             name = 'NeoForged'
             url = 'https://maven.neoforged.net/releases'
         }
@@ -18,16 +22,16 @@ rootProject.name = 'mc-douyin-danmaku'
 // =====================================================================
 //  Minecraft 1.21.1 分支
 //
-//  这个分支只包含 1.21.1 的两个加载器端，方便只想给 1.21.1 编译的人：
-//  不用下载另一边的依赖，也完全不需要 JDK 17
-//  （1.20.1 的 Forge 端才需要它）。
+//  这个分支包含 1.21.1 的三个加载器端，方便只想给 1.21.1 编译的人：
+//  不用下载 1.20.1 那边的依赖，也完全不需要 JDK 17。
 //
 //  完整的多版本工程在 main 分支，那边同时有 1.20.1 (Fabric/Forge)
-//  和 1.21.1 (Fabric/NeoForge)。
+//  和 1.21.1 (Fabric/NeoForge/Forge)。
 //
-//  为什么 1.21.1 没有 Forge：
-//  从 Minecraft 1.20.2 起 Forge 和 NeoForge 分家，新版本主流是 NeoForge，
-//  Forge 基本停在 1.20.1。
+//  注意 1.21.1 是三个加载器齐全的版本：
+//  很多人以为 Forge 停在 1.20.1 了，其实它一直在跟进新版本
+//  （1.21.1 是 build 52.x，1.21.4 是 54.x，1.21.5 是 55.x），
+//  只是新版本上 NeoForge 更流行。
 // =====================================================================
 
 // 目录名和子项目名不完全一样：:fabric-1.21.1 用的是 fabric/ 目录。
@@ -37,3 +41,6 @@ project(':fabric-1.21.1').projectDir = file('fabric')
 
 include 'neoforge-1.21.1'
 project(':neoforge-1.21.1').projectDir = file('neoforge')
+
+// 目录名和子项目名一致，不用额外指定 projectDir
+include 'forge-1.21.1'
