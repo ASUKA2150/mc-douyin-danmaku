@@ -450,7 +450,7 @@ public final class DanmakuSession {
                     //   online / watched = 直播间真实数据（可靠）
                     new DanmakuEvent.Like(report.amount(), likeCounter.total(),
                             roomStats.online(), roomStats.watched()),
-                    null, System.currentTimeMillis());
+                    null, null, System.currentTimeMillis());
             renderAndSend(summary, snapshot);
         }
     }
