@@ -28,6 +28,7 @@ import java.util.Map;
  * @param gift       礼物信息（只有 {@link Kind#GIFT} 有）
  * @param like       点赞信息（只有 {@link Kind#LIKE} 有）
  * @param member     进房信息（只有 {@link Kind#MEMBER} 有）
+ * @param social     关注/分享信息（只有 {@link Kind#FOLLOW} 有）
  * @param receivedAt 收到时间
  */
 public record DanmakuEvent(
@@ -41,6 +42,7 @@ public record DanmakuEvent(
         Gift gift,
         Like like,
         Member member,
+        Social social,
         long receivedAt
 ) {
 
@@ -53,7 +55,11 @@ public record DanmakuEvent(
         /** 点赞。 */
         LIKE("点赞", "like"),
         /** 进入直播间。 */
-        MEMBER("入场", "member");
+        MEMBER("入场", "member"),
+        /** 关注了主播。 */
+        FOLLOW("关注", "follow"),
+        /** 分享了直播间。 */
+        SHARE("分享", "share");
 
         private final String displayName;
         private final String configKey;
@@ -125,6 +131,40 @@ public record DanmakuEvent(
     public record Member(long memberCount) {
     }
 
+    /**
+     * 社交动作信息（关注、分享）。
+     *
+     * <p>抖音把「关注主播」「分享直播间」这类动作都塞在一条
+     * {@code WebcastSocialMessage} 里，靠 {@code action} 字段区分，
+     * 所以这里也用一个载荷同时服务 {@link Kind#FOLLOW} 和 {@link Kind#SHARE}。
+     *
+     * <p>实测值：{@code action = 1} 是关注，{@code action = 3} 是分享。
+     *
+     * @param action      原始动作值，见 {@link DouyinProtocol} 里的常量
+     * @param followCount 主播的关注数（抖音给的 {@code follow_count}），
+     *                    取不到为 0。<b>这是主播侧的累计数，不是观众的个人数据</b>
+     * @param shareTarget 分享目标的原文（抖音给的 {@code shareTarget}）。
+     *                    实测多数为空，为空时模板里用 {@code %?share.target:...%}
+     *                    条件块可以避免渲染出一对空括号
+     */
+    public record Social(long action, long followCount, String shareTarget) {
+
+        /** 兼容旧调用（没有分享目标时）。 */
+        public Social(long action, long followCount) {
+            this(action, followCount, null);
+        }
+
+        /** 是不是「关注主播」这个动作。 */
+        public boolean isFollow() {
+            return action == 1L;
+        }
+
+        /** 是不是「分享直播间」这个动作。 */
+        public boolean isShare() {
+            return action == 3L;
+        }
+    }
+
     /** 修正 {@code null}，并把空字符串的粉丝团名归一成 {@code null}。 */
     public DanmakuEvent {
         kind = kind == null ? Kind.CHAT : kind;
@@ -144,7 +184,7 @@ public record DanmakuEvent(
     public static DanmakuEvent chat(DanmakuMessage message) {
         return new DanmakuEvent(Kind.CHAT, message.nickname(), message.userLevel(),
                 message.hasUserLevel(), message.fanClubName(), message.fanClubLevel(),
-                message.content(), null, null, null, message.receivedAt());
+                message.content(), null, null, null, null, message.receivedAt());
     }
 
     /** 把事件转回聊天弹幕。不是聊天事件时返回 {@code null}。 */
@@ -188,6 +228,10 @@ public record DanmakuEvent(
         }
         if (member != null && member.memberCount() > 0) {
             values.put("member.count", String.valueOf(member.memberCount()));
+        }
+        if (social != null) {
+            values.put("follow.count", String.valueOf(social.followCount()));
+            values.put("share.target", social.shareTarget() == null ? "" : social.shareTarget());
         }
         return values;
     }

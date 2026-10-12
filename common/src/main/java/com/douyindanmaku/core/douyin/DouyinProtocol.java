@@ -117,6 +117,9 @@ public final class DouyinProtocol {
     /** 进入直播间消息的 method 值。 */
     public static final String METHOD_MEMBER = "WebcastMemberMessage";
 
+    /** 关注/分享等社交动作的 method 值。 */
+    public static final String METHOD_SOCIAL = "WebcastSocialMessage";
+
     /** 直播间统计消息的 method 值（在线人数、累计观看、累计获赞）。 */
     public static final String METHOD_ROOM_USER_SEQ = "WebcastRoomUserSeqMessage";
 
@@ -175,6 +178,56 @@ public final class DouyinProtocol {
     public static final int MEMBER_USER = 2;
     /** MemberMessage：member_count，当前直播间人数。 */
     public static final int MEMBER_COUNT = 3;
+
+    // ------------------------------------------------------------------
+    //  社交动作消息（SocialMessage）的字段号
+    //
+    //  抖音把「关注主播」「分享直播间」这类动作都塞在这一条消息里，
+    //  靠 action 字段区分。
+    //
+    //  字段号来自社区的 proto 定义（lulajax/DouyinLiveJava 等项目的
+    //  douyin.proto），和 ChatMessage / MemberMessage 是同一种命名风格：
+    //      message SocialMessage {
+    //        Common common = 1;        <- 第 1 个字段是 common，不是 user
+    //        User user = 2;            <- 和 ChatMessage 一样在 2
+    //        uint64 shareType = 3;
+    //        uint64 action = 4;
+    //        string shareTarget = 5;
+    //        uint64 followCount = 6;
+    //        PublicAreaCommon publicAreaCommon = 7;
+    //      }
+    //
+    //  注意 user 在 f2 而不是 f7——礼物消息的 user 在 f7，两者不一样，
+    //  这是这套协议里最容易搞混的地方。
+    // ------------------------------------------------------------------
+
+    /** SocialMessage：user（关注者的用户信息，和弹幕消息一样在 2）。 */
+    public static final int SOCIAL_USER = 2;
+    /** SocialMessage：action，动作类型。 */
+    public static final int SOCIAL_ACTION = 4;
+    /** SocialMessage：follow_count，主播的累计关注数。 */
+    public static final int SOCIAL_FOLLOW_COUNT = 6;
+
+    /**
+     * {@code action = 1} 表示「关注了主播」。
+     *
+     * <p>这个值来自社区实现（抖音官方没有公开文档），<b>已实测确认</b>：
+     * 关注消息能正常显示。
+     */
+    public static final long SOCIAL_ACTION_FOLLOW = 1L;
+
+    /**
+     * {@code action = 3} 表示「分享了直播间」。
+     *
+     * <p><b>已实测确认</b>：日志里抓到过
+     * {@code 收到非关注的社交动作（action=3，多半是分享）}。
+     */
+    public static final long SOCIAL_ACTION_SHARE = 3L;
+
+    /** SocialMessage：share_type，分享渠道的类型编号。 */
+    public static final int SOCIAL_SHARE_TYPE = 3;
+    /** SocialMessage：share_target，分享目标的原文。实测多数为空。 */
+    public static final int SOCIAL_SHARE_TARGET = 5;
 
     // ------------------------------------------------------------------
     //  直播间统计消息（RoomUserSeqMessage）的字段号
@@ -396,6 +449,7 @@ public final class DouyinProtocol {
                 case METHOD_GIFT -> decodeGiftEvent(body, config);
                 case METHOD_LIKE -> decodeLikeEvent(body, config);
                 case METHOD_MEMBER -> decodeMemberEvent(body, config);
+                case METHOD_SOCIAL -> decodeSocialEvent(body, config);
                 default -> null;
             };
 
@@ -418,6 +472,7 @@ public final class DouyinProtocol {
     public static boolean isKnownMethod(String method) {
         return METHOD_CHAT.equals(method) || METHOD_GIFT.equals(method)
                 || METHOD_LIKE.equals(method) || METHOD_MEMBER.equals(method)
+                || METHOD_SOCIAL.equals(method)
                 || METHOD_ROOM_USER_SEQ.equals(method) || METHOD_ROOM_STATS.equals(method);
     }
 
@@ -708,7 +763,7 @@ public final class DouyinProtocol {
                 userInfo.userLevel(), userInfo.hasUserLevel(),
                 userInfo.fanClubName(), userInfo.fanClubLevel(),
                 "", new DanmakuEvent.Gift(giftName, repeatCount, comboCount, repeatEnd, diamondCount),
-                null, null, System.currentTimeMillis());
+                null, null, null, System.currentTimeMillis());
     }
 
     /**
@@ -735,7 +790,7 @@ public final class DouyinProtocol {
         return new DanmakuEvent(DanmakuEvent.Kind.LIKE, userInfo.nickname(),
                 userInfo.userLevel(), userInfo.hasUserLevel(),
                 userInfo.fanClubName(), userInfo.fanClubLevel(),
-                "", null, new DanmakuEvent.Like(increment), null, System.currentTimeMillis());
+                "", null, new DanmakuEvent.Like(increment), null, null, System.currentTimeMillis());
     }
 
     /** 解一条进房消息。 */
@@ -752,8 +807,68 @@ public final class DouyinProtocol {
         return new DanmakuEvent(DanmakuEvent.Kind.MEMBER, userInfo.nickname(),
                 userInfo.userLevel(), userInfo.hasUserLevel(),
                 userInfo.fanClubName(), userInfo.fanClubLevel(),
-                "", null, null, new DanmakuEvent.Member(memberCount), System.currentTimeMillis());
+                "", null, null, new DanmakuEvent.Member(memberCount), null,
+                System.currentTimeMillis());
     }
+
+    /**
+     * 解一条社交动作消息（关注、分享）。
+     *
+     * <p>抖音把这类动作都塞在 {@code WebcastSocialMessage} 里，靠
+     * {@code action} 字段区分。目前处理两种：
+     * <ul>
+     *   <li>{@code action = 1} 关注了主播（{@link #SOCIAL_ACTION_FOLLOW}）</li>
+     *   <li>{@code action = 3} 分享了直播间（{@link #SOCIAL_ACTION_SHARE}）</li>
+     * </ul>
+     * 两个值都是<b>实测确认</b>的：关注能看到显示，
+     * 分享在日志里抓到过 {@code action=3}。
+     *
+     * <p>其它动作值忽略——显示出来只会让聊天栏变吵。
+     */
+    private static DanmakuEvent decodeSocialEvent(byte[] body, DanmakuConfig config) {
+        ProtobufReader.FieldSet socialMessage = ProtobufReader.parse(body);
+
+        long action = socialMessage.getLong(SOCIAL_ACTION, 0L);
+        DanmakuEvent.Kind kind = switch ((int) action) {
+            case 1 -> DanmakuEvent.Kind.FOLLOW;
+            case 3 -> DanmakuEvent.Kind.SHARE;
+            default -> null;
+        };
+
+        UserInfo userInfo = readUser(socialMessage.getMessage(SOCIAL_USER), config);
+
+        if (kind == null) {
+            // 没见过的动作。记一条日志——万一抖音改了约定，
+            // 用户把日志发过来就能一眼看出该加哪个值。
+            // 只在「有昵称」时记，而且只记一次，不然一场直播能刷几百行。
+            if (!userInfo.nickname().isEmpty() && !socialActionLogged) {
+                socialActionLogged = true;
+                com.douyindanmaku.core.DanmakuLog.info(
+                        "收到没见过的社交动作（action=" + action + "），来自「"
+                                + userInfo.nickname() + "」。"
+                                + "如果这是关注或分享，请把这一行发给我。");
+            }
+            return null;
+        }
+
+        if (userInfo.nickname().isEmpty()) {
+            // 没昵称的社交消息，显示出来也不知道是谁
+            return null;
+        }
+
+        long followCount = socialMessage.getLong(SOCIAL_FOLLOW_COUNT, 0L);
+        String shareTarget = socialMessage.getString(SOCIAL_SHARE_TARGET, null);
+
+        return new DanmakuEvent(kind, userInfo.nickname(),
+                userInfo.userLevel(), userInfo.hasUserLevel(),
+                userInfo.fanClubName(), userInfo.fanClubLevel(),
+                "", null, null, null,
+                new DanmakuEvent.Social(action, followCount, shareTarget),
+                System.currentTimeMillis());
+    }
+
+    /** 上面那条诊断日志只记一次，避免刷屏。 */
+    private static volatile boolean socialActionLogged = false;
 
     // ------------------------------------------------------------------
     //  用户信息的公共部分

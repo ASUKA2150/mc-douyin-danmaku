@@ -171,6 +171,14 @@ final class DouyinCommandHandler {
                 config.showMember = !config.showMember;
                 notify("&7进房消息：&f" + onOff(config.showMember));
             }
+            case "follow", "关注" -> {
+                config.showFollow = !config.showFollow;
+                notify("&7关注消息：&f" + onOff(config.showFollow));
+            }
+            case "share", "分享" -> {
+                config.showShare = !config.showShare;
+                notify("&7分享消息：&f" + onOff(config.showShare));
+            }
             case "like", "点赞" -> {
                 config.showLike = !config.showLike;
                 notify("&7点赞播报：&f" + onOff(config.showLike)
@@ -178,7 +186,7 @@ final class DouyinCommandHandler {
                         ? "&7（按人攒一波，停下来 5 秒后报一次；同一人 30 秒最多一次）" : ""));
             }
             default -> {
-                notify("&c要开关哪一种？可用：&fchat&7 / &fgift&7 / &fmember&7 / &flike");
+                notify("&c要开关哪一种？可用：&fchat&7 / &fgift&7 / &fmember&7 / &ffollow&7 / &fshare&7 / &flike");
                 notify("&7例如：&f/dy toggle gift&7 切换礼物消息");
                 return 0;
             }

@@ -236,6 +236,30 @@ public final class DanmakuConfig {
     public boolean showLike = false;
 
     /**
+     * 是否显示关注消息。
+     *
+     * <p>默认<b>开</b>：关注是低频事件（一场直播不会有几百个人关注），
+     * 而且是主播最想看到的信息之一，所以不像进房/点赞那样默认关掉。
+     *
+     * <p>抖音把「关注主播」「分享直播间」这类社交动作都放在同一条
+     * {@code WebcastSocialMessage} 里。实测关注的 {@code action = 1}，
+     * 目前只处理这一种——分享之类的动作不显示，免得混淆。
+     */
+    public boolean showFollow = true;
+
+    /**
+     * 是否显示分享消息。
+     *
+     * <p>默认<b>开</b>。分享和关注一样是低频事件（实测一场直播里两者
+     * 出现次数差不多），而且对主播来说信息量更大——有人关注可能只是
+     * 顺手点，但<b>分享意味着他觉得这场值得推荐给别人</b>，
+     * 是内容质量的直接反馈。
+     *
+     * <p>和关注分开一个开关，是因为有人可能只想要其中一个。
+     */
+    public boolean showShare = true;
+
+    /**
      * 礼物消息模板。
      *
      * <p><b>两个容易踩的坑</b>（都写在这里免得以后又踩）：
@@ -293,6 +317,33 @@ public final class DanmakuConfig {
     /** 进房消息模板。 */
     public String memberFormat =
             "&7[&f抖音&7] %?fanclub.isMember:[&d粉丝团%fanclub.level%&7] %&b%nick%&7 进入了直播间";
+
+    /**
+     * 关注消息模板。
+     *
+     * <p>配色用<b>橙金色</b>（{@code &6} 金 + {@code &e} 亮黄金），
+     * 和点赞的红色系、进房的青色系区分开——关注是好消息，
+     * 值得一个显眼的颜色。
+     *
+     * <p>可用占位符和其他消息一样，外加 {@code %follow.count%}
+     * （主播的累计关注数，取不到时是 0）。
+     */
+    public String followFormat =
+            "&7[&f抖音&7] %?fanclub.isMember:[&d粉丝团%fanclub.level%&7] %&b%nick%&6 关注了主播";
+
+    /**
+     * 分享消息模板。
+     *
+     * <p>配色用<b>绿色</b>（{@code &a}）——前面几种事件已经把青色（弹幕/进房）、
+     * 亮黄（礼物）、品红+红（点赞）、橙金（关注）占掉了，绿色还没人用，
+     * 而且「分享出去」这个动作配绿色也顺。
+     *
+     * <p>{@code %?share.target:...%} 那个条件块是为了「知道分享到哪就显示，
+     * 不知道就不显示」——实测抖音多数时候不给这个字段，
+     * 无条件写会渲染出一对空括号。
+     */
+    public String shareFormat =
+            "&7[&f抖音&7] %?fanclub.isMember:[&d粉丝团%fanclub.level%&7] %&b%nick%&a 分享了直播间";
 
     // ------------------------------------------------------------------
     //  过滤设置
@@ -437,10 +488,12 @@ public final class DanmakuConfig {
         copy.showGift = showGift;
         copy.showMember = showMember;
         copy.showLike = showLike;
+        copy.showFollow = showFollow;
         copy.giftFormat = giftFormat;
         copy.likeFormat = likeFormat;
         copy.likeAnonymousFormat = likeAnonymousFormat;
         copy.memberFormat = memberFormat;
+        copy.followFormat = followFormat;
         copy.filterMode = filterMode;
         copy.filterKeywords = new ArrayList<>(filterKeywords);
         copy.blockedUsers = new ArrayList<>(blockedUsers);
@@ -494,6 +547,9 @@ public final class DanmakuConfig {
         }
         if (memberFormat == null || memberFormat.isBlank()) {
             memberFormat = fallback.memberFormat;
+        }
+        if (followFormat == null || followFormat.isBlank()) {
+            followFormat = fallback.followFormat;
         }
         // likeAnonymousFormat 允许是空字符串（表示不显示匿名点赞），所以这里不补默认值
         if (likeAnonymousFormat == null) {
