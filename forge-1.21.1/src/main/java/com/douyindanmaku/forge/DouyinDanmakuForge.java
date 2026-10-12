@@ -238,10 +238,14 @@ public final class DouyinDanmakuForge {
         target.showGift = reloaded.showGift;
         target.showMember = reloaded.showMember;
         target.showLike = reloaded.showLike;
+        target.showFollow = reloaded.showFollow;
+        target.showShare = reloaded.showShare;
         target.giftFormat = reloaded.giftFormat;
         target.likeFormat = reloaded.likeFormat;
         target.likeAnonymousFormat = reloaded.likeAnonymousFormat;
         target.memberFormat = reloaded.memberFormat;
+        target.followFormat = reloaded.followFormat;
+        target.shareFormat = reloaded.shareFormat;
         target.filterMode = reloaded.filterMode;
         target.filterKeywords = new java.util.ArrayList<>(reloaded.filterKeywords);
         target.blockedUsers = new java.util.ArrayList<>(reloaded.blockedUsers);

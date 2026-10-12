@@ -44,6 +44,8 @@ public class DecodeCheck {
         testGiftEvent();
         testLikeEvent();
         testMemberEvent();
+        testSocialEvent();
+        testShareEvent();
         testLikeCounter();
 
         System.out.println();
@@ -543,6 +545,161 @@ public class DecodeCheck {
     }
 
     /**
+     * 关注消息（WebcastSocialMessage）。
+     *
+     * <p>这是后加的功能。要点有三个：
+     * <ol>
+     *   <li>action = 1 才算关注，别的动作（分享之类）不该显示</li>
+     *   <li>user 在字段 2（和弹幕消息一样，不是礼物消息的 7）</li>
+     *   <li>默认是<b>开</b>的——和进房/点赞不一样，关注是低频事件</li>
+     * </ol>
+     */
+    private static void testSocialEvent() {
+        String name = "关注消息";
+
+        // SocialMessage：user(f2) + action(f4) + follow_count(f6)
+        byte[] socialMessage = msg(
+                field(2, bytes(msg(field(3, str("新粉丝丙"))))),
+                varintField(4, 1),
+                varintField(6, 8888));
+        byte[] event0 = msg(field(1, str("WebcastSocialMessage")), field(2, bytes(socialMessage)));
+        byte[] frame = msg(field(8, bytes(gzip(msg(field(1, bytes(event0)))))));
+
+        var decoded = DouyinProtocol.decodeFrameToEvents(frame, DanmakuConfig.defaults());
+        check(name + " -> 解出 1 条", decoded.events().size() == 1);
+        if (decoded.events().isEmpty()) {
+            return;
+        }
+        var event = decoded.events().get(0);
+        check(name + " -> 类型是关注", event.kind() == com.douyindanmaku.core.model.DanmakuEvent.Kind.FOLLOW);
+        check(name + " -> 昵称", "新粉丝丙".equals(event.nickname()));
+        check(name + " -> 载荷存在", event.social() != null);
+        check(name + " -> action 认出来了", event.social() != null && event.social().isFollow());
+        check(name + " -> 关注数", event.social() != null && event.social().followCount() == 8888);
+
+        // 默认是开的，不需要额外打开
+        String rendered = DanmakuFormatter.formatEvent(event, DanmakuConfig.defaults());
+        check(name + " -> 默认就显示", rendered != null && rendered.contains("新粉丝丙"));
+        check(name + " -> 渲染不留模板语法", rendered != null && !rendered.contains("%"));
+        check(name + " -> 默认模板含「关注」", rendered != null && rendered.contains("关注"));
+
+        // 关掉就不显示
+        DanmakuConfig followOff = DanmakuConfig.defaults();
+        followOff.showFollow = false;
+        check(name + " -> 关掉后不显示",
+                DanmakuFormatter.formatEvent(event, followOff) == null);
+
+        // 没见过的动作（action = 99）不该产生事件。
+        // 注意别拿 3 来测：3 是分享，现在是有效动作了。
+        byte[] unknownMessage = msg(
+                field(2, bytes(msg(field(3, str("路过的丁"))))),
+                varintField(4, 99));
+        byte[] unknownEvent = msg(field(1, str("WebcastSocialMessage")), field(2, bytes(unknownMessage)));
+        byte[] unknownFrame = msg(field(8, bytes(gzip(msg(field(1, bytes(unknownEvent)))))));
+        var unknownDecoded = DouyinProtocol.decodeFrameToEvents(unknownFrame, DanmakuConfig.defaults());
+        check(name + " -> 没见过的动作不产生事件", unknownDecoded.events().isEmpty());
+
+        // 没有昵称的关注消息也没意义
+        byte[] noNick = msg(varintField(4, 1), varintField(6, 100));
+        byte[] noNickEvent = msg(field(1, str("WebcastSocialMessage")), field(2, bytes(noNick)));
+        byte[] noNickFrame = msg(field(8, bytes(gzip(msg(field(1, bytes(noNickEvent)))))));
+        var noNickDecoded = DouyinProtocol.decodeFrameToEvents(noNickFrame, DanmakuConfig.defaults());
+        check(name + " -> 没昵称不产生事件", noNickDecoded.events().isEmpty());
+
+        // %follow.count% 占位符
+        DanmakuConfig withPlaceholder = DanmakuConfig.defaults();
+        withPlaceholder.followFormat = "关注数=%follow.count% 昵称=%nick%";
+        String ph = DanmakuFormatter.formatEvent(event, withPlaceholder);
+        check(name + " -> %follow.count% 能填上", ph != null && ph.contains("8888"));
+        check(name + " -> %nick% 能填上", ph != null && ph.contains("新粉丝丙"));
+    }
+
+    /**
+     * 分享直播间（{@code WebcastSocialMessage}，{@code action = 3}）。
+     *
+     * <p>和关注是同一条消息，靠 action 区分。实测确认过：
+     * 日志里抓到过 {@code action=3}。
+     */
+    private static void testShareEvent() {
+        String name = "分享消息";
+
+        // action = 3 是分享
+        byte[] shareMessage = msg(
+                field(2, bytes(msg(field(3, str("分享者戊"))))),
+                varintField(3, 1),
+                varintField(4, 3));
+        byte[] event0 = msg(field(1, str("WebcastSocialMessage")), field(2, bytes(shareMessage)));
+        byte[] frame = msg(field(8, bytes(gzip(msg(field(1, bytes(event0)))))));
+
+        var decoded = DouyinProtocol.decodeFrameToEvents(frame, DanmakuConfig.defaults());
+        check(name + " -> 解出 1 条", decoded.events().size() == 1);
+        if (decoded.events().isEmpty()) {
+            return;
+        }
+        var event = decoded.events().get(0);
+        check(name + " -> 类型是分享", event.kind() == com.douyindanmaku.core.model.DanmakuEvent.Kind.SHARE);
+        check(name + " -> 昵称", "分享者戊".equals(event.nickname()));
+        check(name + " -> isShare 认得出来", event.social() != null && event.social().isShare());
+        check(name + " -> 不会被当成关注", event.social() != null && !event.social().isFollow());
+
+        // 默认开
+        String rendered = DanmakuFormatter.formatEvent(event, DanmakuConfig.defaults());
+        check(name + " -> 默认就显示", rendered != null && rendered.contains("分享者戊"));
+        check(name + " -> 默认模板含「分享」", rendered != null && rendered.contains("分享"));
+        check(name + " -> 渲染不留模板语法", rendered != null && !rendered.contains("%"));
+
+        // 关掉就不显示
+        DanmakuConfig shareOff = DanmakuConfig.defaults();
+        shareOff.showShare = false;
+        check(name + " -> 关掉后不显示",
+                DanmakuFormatter.formatEvent(event, shareOff) == null);
+
+        // 关注和分享的开关是独立的：关掉分享不该影响关注
+        byte[] followMessage = msg(
+                field(2, bytes(msg(field(3, str("关注者己"))))),
+                varintField(4, 1));
+        byte[] followEvent0 = msg(field(1, str("WebcastSocialMessage")), field(2, bytes(followMessage)));
+        byte[] followFrame = msg(field(8, bytes(gzip(msg(field(1, bytes(followEvent0)))))));
+        var followDecoded = DouyinProtocol.decodeFrameToEvents(followFrame, DanmakuConfig.defaults());
+        check(name + " -> 同一条消息里 action=1 仍走关注",
+                followDecoded.events().size() == 1
+                        && followDecoded.events().get(0).kind()
+                        == com.douyindanmaku.core.model.DanmakuEvent.Kind.FOLLOW);
+        check(name + " -> 关掉分享不影响关注",
+                !followDecoded.events().isEmpty()
+                        && DanmakuFormatter.formatEvent(followDecoded.events().get(0), shareOff) != null);
+
+        // share.target：有值时能填上
+        byte[] withTargetMessage = msg(
+                field(2, bytes(msg(field(3, str("带目标的庚"))))),
+                varintField(4, 3),
+                field(5, str("微信")));
+        byte[] wtEvent0 = msg(field(1, str("WebcastSocialMessage")), field(2, bytes(withTargetMessage)));
+        byte[] wtFrame = msg(field(8, bytes(gzip(msg(field(1, bytes(wtEvent0)))))));
+        var wtDecoded = DouyinProtocol.decodeFrameToEvents(wtFrame, DanmakuConfig.defaults());
+        check(name + " -> 带 share_target 能解出来", wtDecoded.events().size() == 1);
+        if (!wtDecoded.events().isEmpty()) {
+            var wtEvent = wtDecoded.events().get(0);
+            check(name + " -> shareTarget 读到了",
+                    wtEvent.social() != null && "微信".equals(wtEvent.social().shareTarget()));
+
+            DanmakuConfig withTarget = DanmakuConfig.defaults();
+            withTarget.shareFormat = "%nick% 分享到了 %?share.hasTarget:%share.target%%";
+            String wtText = DanmakuFormatter.formatEvent(wtEvent, withTarget);
+            check(name + " -> %share.target% 能填上", wtText != null && wtText.contains("微信"));
+            check(name + " -> 条件块被处理掉", wtText != null && !wtText.contains("%?"));
+
+            // 没有 target 时，条件块整段消失（不会留下空括号）
+            DanmakuConfig noTarget = DanmakuConfig.defaults();
+            noTarget.shareFormat = "%nick% 分享了%?share.hasTarget:（到 %share.target%）%";
+            String noTargetText = DanmakuFormatter.formatEvent(event, noTarget);
+            check(name + " -> 没 target 时条件块整段消失",
+                    noTargetText != null && !noTargetText.contains("（")
+                            && !noTargetText.contains("%"));
+        }
+    }
+
+    /**
      * 点赞累计器。
      *
      * <p>这是「点赞能显示多少赞」的核心——抖音不推总数，只能自己加。
@@ -618,7 +775,7 @@ public class DecodeCheck {
         DanmakuConfig likeConfig = DanmakuConfig.defaults();
         likeConfig.showLike = true;
         DanmakuEvent likeEvent = new DanmakuEvent(DanmakuEvent.Kind.LIKE, "张三", 0, false,
-                null, 0, "", null, new DanmakuEvent.Like(30, 25_000), null, System.currentTimeMillis());
+                null, 0, "", null, new DanmakuEvent.Like(30, 25_000), null, null, System.currentTimeMillis());
         String likeText = DanmakuFormatter.formatEvent(likeEvent, likeConfig);
         check(name + " -> 渲染含昵称", likeText != null && likeText.contains("张三"));
         check(name + " -> 默认模板就是「XXX为主播点赞」",
@@ -646,7 +803,7 @@ public class DecodeCheck {
 
         // 匿名模板默认是空的 → 不显示
         DanmakuEvent anonymousEvent = new DanmakuEvent(DanmakuEvent.Kind.LIKE, "", 0, false,
-                null, 0, "", null, new DanmakuEvent.Like(50, 5000), null, System.currentTimeMillis());
+                null, 0, "", null, new DanmakuEvent.Like(50, 5000), null, null, System.currentTimeMillis());
         check(name + " -> 匿名默认不显示",
                 DanmakuFormatter.formatEvent(anonymousEvent, likeConfig) == null
                         || DanmakuFormatter.formatEvent(anonymousEvent, likeConfig).isBlank());
@@ -669,7 +826,7 @@ public class DecodeCheck {
 
         DanmakuEvent event = new DanmakuEvent(DanmakuEvent.Kind.LIKE, "张三", 0, false,
                 null, 0, "", null, new DanmakuEvent.Like(30, 350, 2284, "6万+"),
-                null, System.currentTimeMillis());
+                null, null, System.currentTimeMillis());
 
         String rendered = DanmakuFormatter.formatEvent(event, config);
         check(name + " -> 渲染成功", rendered != null);

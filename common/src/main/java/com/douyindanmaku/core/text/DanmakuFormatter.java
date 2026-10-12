@@ -16,6 +16,11 @@ import com.douyindanmaku.core.model.DanmakuMessage;
  *   %room%      直播间号（渲染提示信息时用）
  * </pre>
  *
+ * <p>按事件类型还有各自的占位符，比如礼物是 {@code %gift.name%}、
+ * 进房是 {@code %member.count%}、关注是 {@code %follow.count%}。
+ * 完整清单见 {@link #PLACEHOLDER_NAMES}——<b>往模板里加新占位符时
+ * 一定要同步往那个列表里加</b>，否则渲染前会被当成「残留占位符」清掉。
+ *
  * <h2>条件块（用来避免空括号）</h2>
  * 模板里可以直接写「有才显示」的段落，语法是 {@code %?条件:内容%}。
  * 条件不成立时，连同段落里的颜色代码一起消失。
@@ -92,7 +97,7 @@ public final class DanmakuFormatter {
             "gift.name", "gift.count", "gift.combo", "gift.diamond",
             "like.count", "like.total", "like.session",
             "room.online", "room.watched",
-            "member.count");
+            "member.count", "follow.count", "share.target");
 
     /** emoji 的码点范围。Minecraft 字体画不出彩色 emoji，会变成方框。 */
     private static final int[][] EMOJI_RANGES = {
@@ -190,6 +195,8 @@ public final class DanmakuFormatter {
             case CHAT -> config.chatFormat;
             case GIFT -> config.giftFormat;
             case MEMBER -> config.memberFormat;
+            case FOLLOW -> config.followFormat;
+            case SHARE -> config.shareFormat;
             case LIKE -> event.nickname() == null || event.nickname().isBlank()
                     // 拿不到昵称的点赞用另一个模板。它默认是空字符串，
                     // 也就是「不显示」——「不知道是谁」的点赞播报价值不大。
@@ -206,6 +213,8 @@ public final class DanmakuFormatter {
             case CHAT -> true;
             case GIFT -> config.showGift;
             case MEMBER -> config.showMember;
+            case FOLLOW -> config.showFollow;
+            case SHARE -> config.showShare;
             case LIKE -> config.showLike;
         };
         return enabled ? template : null;
@@ -265,6 +274,20 @@ public final class DanmakuFormatter {
         DanmakuEvent.Member member = event.member();
         if (member != null && member.memberCount() > 0) {
             result = result.replace("%member.count%", String.valueOf(member.memberCount()));
+        }
+
+        DanmakuEvent.Social social = event.social();
+        if (social != null) {
+            if (social.followCount() > 0) {
+                // 用 NumberText.format 是为了过万显示成「1.2万」——
+                // 主播的关注数很容易上万，直接甩一串数字不好读。
+                result = result.replace("%follow.count%", NumberText.format(social.followCount()));
+            }
+            if (social.shareTarget() != null && !social.shareTarget().isBlank()) {
+                // 分享目标（实测多数时候抖音不给这个字段，
+                // 所以模板里应该用 %?share.hasTarget:...% 包起来）
+                result = result.replace("%share.target%", clean(social.shareTarget(), false));
+            }
         }
 
         return result;
@@ -409,6 +432,13 @@ public final class DanmakuFormatter {
             case "kind.isGift" -> event.kind() == DanmakuEvent.Kind.GIFT;
             case "kind.isLike" -> event.kind() == DanmakuEvent.Kind.LIKE;
             case "kind.isMember" -> event.kind() == DanmakuEvent.Kind.MEMBER;
+            case "kind.isFollow" -> event.kind() == DanmakuEvent.Kind.FOLLOW;
+            case "kind.isShare" -> event.kind() == DanmakuEvent.Kind.SHARE;
+            // 分享目标拿得到才显示——抖音多数时候不给这个字段，
+            // 无条件写会渲染出一对空括号。
+            case "share.hasTarget" -> event.social() != null
+                    && event.social().shareTarget() != null
+                    && !event.social().shareTarget().isBlank();
             // 连击数大于 1 才显示（避免每个单发礼物都带个「x1」）
             case "gift.isCombo" -> event.gift() != null && event.gift().comboCount() > 1;
             // 连击结束了：抖音会为一次连击推多条消息，只有最后一条带这个标记
