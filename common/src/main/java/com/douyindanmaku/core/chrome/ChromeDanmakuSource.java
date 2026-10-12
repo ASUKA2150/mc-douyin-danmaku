@@ -159,9 +159,15 @@ public final class ChromeDanmakuSource {
     /**
      * 主循环：连上 → 保活 → 断了就自动重连。
      *
-     * <p>这个循环会一直转到用户主动断开为止。中途任何失败都只记录并退避重试，
-     * 不会让功能永久失效——直播场景下中途断连是很常见的
-     * （页面被省电机制冻结、网页自己刷新、网络抖动、主播重新开播等）。
+     * <p>这个循环会一直转到用户主动断开、或者连续失败太多次为止。
+     *
+     * <h2>为什么要给重试设上限</h2>
+     * 一开始这里是无条件无限重试的，理由是「直播中途断连很常见」。
+     * 但实测发现有个很烦的情况：<b>主播没开播时，它会一直转下去</b>——
+     * 每 5~60 秒开一次浏览器去看一眼，转一整晚，日志里堆满重复的失败。
+     *
+     * <p>所以现在把「该不该继续」交给 {@link ReconnectPolicy} 判断：
+     * 它按失败原因分两档上限，到顶就停下来并告诉用户怎么办。
      */
     private void run(String webRid) {
         try {
@@ -173,7 +179,7 @@ public final class ChromeDanmakuSource {
                 return;
             }
 
-            int consecutiveFailures = 0;
+            ReconnectPolicy policy = new ReconnectPolicy();
 
             while (running.get() && !Thread.currentThread().isInterrupted()) {
                 try {
@@ -182,16 +188,19 @@ public final class ChromeDanmakuSource {
                         return;
                     }
                     if (ok) {
-                        consecutiveFailures = 0;
+                        // 成功连上过一次就清零——直播是个长期过程，
+                        // 中途断几次很正常，不该累积到上限。
+                        policy.recordSuccess();
                     } else {
-                        consecutiveFailures++;
+                        // runOnce 返回 false 只有一种情况：页面开了但没找到弹幕通道
+                        policy.recordChannelNotFound();
                     }
                 } catch (InterruptedException interrupted) {
                     Thread.currentThread().interrupt();
                     return;
                 } catch (Exception failed) {
-                    consecutiveFailures++;
-                    DanmakuLog.error("Chrome 旁观失败（第 " + consecutiveFailures + " 次）", failed);
+                    policy.recordOtherFailure();
+                    DanmakuLog.error("Chrome 旁观失败（第 " + policy.consecutiveFailures() + " 次）", failed);
                     listener.onState("连接失败：" + failed.getMessage());
                 } finally {
                     closeChrome();
@@ -201,10 +210,23 @@ public final class ChromeDanmakuSource {
                     return;
                 }
 
-                // 指数退避：5 秒起，最多 60 秒。
-                // 第一次失败等的时间短一点，因为最常见的情况是网页自己刷新了一下。
-                long backoffSeconds = Math.min(60L, 5L * (1L << Math.min(consecutiveFailures, 4)) / 2L);
-                listener.onState("弹幕连接已断开，" + backoffSeconds + " 秒后自动重连…");
+                // ---- 到上限就停下来，并给出能照做的提示 ----
+                if (!policy.shouldRetry()) {
+                    if (policy.stoppedBecauseChannelNotFound()) {
+                        listener.onState("连续 " + policy.consecutiveFailures()
+                                + " 次都没找到直播间画面，先停止重试。最常见的原因是主播没开播。");
+                        listener.onState("等主播开播后，用 /dy connect " + webRid + " 再连一次即可。");
+                    } else {
+                        listener.onState("连续 " + policy.consecutiveFailures()
+                                + " 次连接失败，先停止重试。"
+                                + "可以看看日志文件里的报错，修好后用 /dy connect " + webRid + " 重连。");
+                    }
+                    return;
+                }
+
+                long backoffSeconds = policy.backoffSeconds();
+                listener.onState("弹幕连接已断开，" + backoffSeconds + " 秒后自动重连（第 "
+                        + (policy.consecutiveFailures() + 1) + " 次）…");
                 Thread.sleep(backoffSeconds * 1000L);
                 if (!running.get()) {
                     return;
