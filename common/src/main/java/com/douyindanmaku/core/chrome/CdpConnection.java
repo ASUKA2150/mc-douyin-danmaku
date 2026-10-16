@@ -624,6 +624,27 @@ final class CdpConnection {
     }
 
     /**
+     * 让页面重新加载当前地址（相当于按 F5）。
+     *
+     * <h2>为什么需要这个，而不是直接 navigate 到原地址</h2>
+     * 效果上两者差不多，但 {@code Page.reload} 不需要我们记住地址，
+     * 也会保留浏览器的后退栈和历史记录。更重要的是语义清楚：
+     * 「页面卡了，刷一下」，而不是「换一个页面」。
+     *
+     * @param ignoreCache 是否绕过缓存。绕缓存会重新下载页面资源，
+     *                    慢一些但更可能是干净状态；正常情况下不需要。
+     */
+    void reloadPage(boolean ignoreCache) throws IOException {
+        CdpWebSocket socket = pageSocket;
+        if (socket == null) {
+            throw new IOException("还没有连接到页面，无法刷新（调用顺序错误："
+                    + "必须先 openBlankPage 再 attachToPage）");
+        }
+        socket.call("Page.reload",
+                "{\"ignoreCache\":" + ignoreCache + "}");
+    }
+
+    /**
      * 打开抖音直播首页，让用户登录。
      *
      * <p>用首页而不是某个直播间：登录是站点级别的，首页有登录入口，

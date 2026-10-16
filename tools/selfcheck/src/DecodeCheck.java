@@ -8,6 +8,8 @@ import com.douyindanmaku.core.text.LikeCounter;
 import com.douyindanmaku.core.text.NumberText;
 
 import java.io.ByteArrayOutputStream;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 
@@ -46,6 +48,7 @@ public class DecodeCheck {
         testMemberEvent();
         testSocialEvent();
         testShareEvent();
+        testReconnectPolicy();
         testLikeCounter();
 
         System.out.println();
@@ -696,6 +699,101 @@ public class DecodeCheck {
             check(name + " -> 没 target 时条件块整段消失",
                     noTargetText != null && !noTargetText.contains("（")
                             && !noTargetText.contains("%"));
+        }
+    }
+
+    /**
+     * 重连策略。
+     *
+     * <p>为什么值得测：以前这里是<b>无条件无限重试</b>的，结果实测发现
+     * 主播没开播时模组会转一整晚——每 5~60 秒开一次浏览器去看一眼，
+     * 日志里堆满重复的失败。现在按失败原因分两档上限。
+     *
+     * <p>用反射调用是因为 {@code ReconnectPolicy} 是包内可见的工具类
+     * （和 {@code CdpConnection} 一样），而自检代码在默认包。
+     * 为了测试把生产类改成 public 不值得。
+     */
+    private static void testReconnectPolicy() {
+        String name = "重连策略";
+
+        try {
+            Class<?> cls = Class.forName("com.douyindanmaku.core.chrome.ReconnectPolicy");
+            Constructor<?> ctor = cls.getDeclaredConstructor();
+            ctor.setAccessible(true);
+            Method mSuccess = cls.getDeclaredMethod("recordSuccess");
+            Method mNotFound = cls.getDeclaredMethod("recordChannelNotFound");
+            Method mOther = cls.getDeclaredMethod("recordOtherFailure");
+            Method mShould = cls.getDeclaredMethod("shouldRetry");
+            Method mBackoff = cls.getDeclaredMethod("backoffSeconds");
+            Method mCount = cls.getDeclaredMethod("consecutiveFailures");
+            Method mReason = cls.getDeclaredMethod("stoppedBecauseChannelNotFound");
+            for (Method m : new Method[]{mSuccess, mNotFound, mOther, mShould, mBackoff, mCount, mReason}) {
+                m.setAccessible(true);
+            }
+
+            Object p = ctor.newInstance();
+
+            // ---- 初始状态：没有任何失败，应该继续 ----
+            check(name + " -> 初始应该继续重试", (boolean) mShould.invoke(p));
+
+            // ---- 「没找到通道」：5 次就到顶 ----
+            for (int i = 1; i <= 4; i++) {
+                mNotFound.invoke(p);
+                check(name + " -> 没找到通道第 " + i + " 次还能重试", (boolean) mShould.invoke(p));
+            }
+            mNotFound.invoke(p);
+            check(name + " -> 没找到通道第 5 次到顶", !(boolean) mShould.invoke(p));
+            check(name + " -> 到顶时失败次数是 5", (int) mCount.invoke(p) == 5);
+            check(name + " -> 原因标成「没找到通道」", (boolean) mReason.invoke(p));
+
+            // ---- 成功一次就清零（直播中途断几次不该累积）----
+            mSuccess.invoke(p);
+            check(name + " -> 成功后退回可重试", (boolean) mShould.invoke(p));
+            check(name + " -> 成功后计数清零", (int) mCount.invoke(p) == 0);
+
+            // ---- 其它错误：上限更宽，10 次 ----
+            Object q = ctor.newInstance();
+            for (int i = 1; i <= 9; i++) {
+                mOther.invoke(q);
+            }
+            check(name + " -> 其它错误第 9 次还能重试", (boolean) mShould.invoke(q));
+            mOther.invoke(q);
+            check(name + " -> 其它错误第 10 次到顶", !(boolean) mShould.invoke(q));
+            check(name + " -> 原因不是「没找到通道」", !(boolean) mReason.invoke(q));
+
+            // ---- 两类失败混着来时，按「最后一次」判 ----
+            Object r = ctor.newInstance();
+            mNotFound.invoke(r);
+            mNotFound.invoke(r);
+            mNotFound.invoke(r);
+            mNotFound.invoke(r);
+            // 4 次没找到通道，还没到顶
+            check(name + " -> 混合：4 次没找到通道仍可重试", (boolean) mShould.invoke(r));
+            // 换成其它错误，上限变宽，应该继续
+            mOther.invoke(r);
+            check(name + " -> 混合：换成其它错误后仍可重试", (boolean) mShould.invoke(r));
+
+            // ---- 退避时间：递增且有上限 ----
+            Object s = ctor.newInstance();
+            long prev = 0L;
+            boolean monotonic = true;
+            for (int i = 0; i < 6; i++) {
+                mOther.invoke(s);
+                long b = (long) mBackoff.invoke(s);
+                if (b < prev) {
+                    monotonic = false;
+                }
+                if (b > 60L) {
+                    monotonic = false;
+                }
+                prev = b;
+            }
+            check(name + " -> 退避时间递增且不超过 60 秒", monotonic);
+            check(name + " -> 初始退避是 5 秒", (long) mBackoff.invoke(ctor.newInstance()) == 5L);
+
+        } catch (ReflectiveOperationException e) {
+            check(name + " -> 反射调用成功", false);
+            System.out.println("      反射失败：" + e);
         }
     }
 
