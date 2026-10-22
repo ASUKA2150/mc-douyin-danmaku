@@ -100,6 +100,17 @@ public final class ChromeDanmakuSource {
      */
     private static final long PAGE_RELOAD_WAIT_MILLIS = 60_000L;
 
+    /**
+     * 健康检查连续失败几次才判定「浏览器真的没了」。
+     *
+     * <p>检查本身是一次跨进程的同步调用（{@code Browser.getVersion}），
+     * 浏览器在忙着 GC、或者系统整体卡顿时，单次超时是正常的。
+     *
+     * <p>取 3：每轮间隔 1 秒，等于给浏览器 3 秒的喘息时间。
+     * 真的死了的话 3 秒后照样会被发现，不会漏判太久。
+     */
+    private static final int HEALTH_FAILURE_TOLERANCE = 3;
+
     private final DanmakuConfig config;
     private final Listener listener;
     private final Path baseDirectory;
@@ -291,6 +302,14 @@ public final class ChromeDanmakuSource {
         connection.navigate(pageUrl);
 
         // ---- 等弹幕通道出现 ----
+        //
+        // 判定「浏览器死了」用 isBrowserUsable()：它的定义是
+        // 「调试通道能应答 或 进程还活着」。所以这里返回 false 意味着
+        // 进程真的没了、通道也不通——那确实没救，早点报错别干等。
+        //
+        // 注意：浏览器刚启动的那一两秒里，CDP 通道还没握上手是正常的，
+        // 但那种情况进程是活的，isBrowserUsable() 会返回 true，
+        // 循环会继续等，不会误判。
         long deadline = System.currentTimeMillis() + PAGE_SETTLE_MILLIS;
         while (running.get() && System.currentTimeMillis() < deadline) {
             if (danmakuSocketId != null) {
@@ -315,6 +334,13 @@ public final class ChromeDanmakuSource {
         // 每 20 秒确认一次页面还活着、并把它钉在活跃状态。
         long lastKeepAlive = System.currentTimeMillis();
         long lastHealthLog = lastKeepAlive;
+        // 浏览器连续几次健康检查没通过。累积到阈值才判定「真的没了」。
+        //
+        // 为什么要容忍几次：CDP 是一次跨进程的同步调用，在浏览器忙着
+        // 做 GC、或者系统整体卡顿的时候，单次调用超时是正常现象。
+        // 早期版本一次不通就抛异常，等于把好好的连接推倒重来——
+        // 用户看到的就是「突然断联」。
+        int consecutiveHealthFailures = 0;
         // 每次连接都从零开始计数，免得把上一次的数字混进来
         framesReceived.set(0);
         framesDecoded.set(0);
@@ -322,8 +348,15 @@ public final class ChromeDanmakuSource {
         while (running.get() && !Thread.currentThread().isInterrupted()) {
             Thread.sleep(1000L);
 
-            if (!connection.isBrowserUsable()) {
-                throw new IOException("浏览器不可用了（" + connection.explainExit() + "）");
+            if (connection.isBrowserUsable()) {
+                consecutiveHealthFailures = 0;
+            } else {
+                consecutiveHealthFailures++;
+                if (consecutiveHealthFailures >= HEALTH_FAILURE_TOLERANCE) {
+                    throw new IOException("浏览器不可用了（" + connection.explainExit() + "）");
+                }
+                // 还没到阈值，这一轮先跳过，给浏览器一次喘息的机会
+                continue;
             }
 
             long now = System.currentTimeMillis();
@@ -335,7 +368,9 @@ public final class ChromeDanmakuSource {
                 lastKeepAlive = now;
                 connection.keepPageActive();
                 // 页面被丢弃 / 被冻结到不响应时，就干脆重连一次
-                if (!connection.isPageAlive()) {                    throw new IOException("直播间页面已失去响应（可能被浏览器的省电机制冻结了）");
+                if (!connection.isPageAlive()) {
+                    throw new IOException("直播间页面已失去响应"
+                            + "（可能被浏览器的省电机制冻结了）");
                 }
             }
 
@@ -392,8 +427,11 @@ public final class ChromeDanmakuSource {
             return true;
         }
 
-        // 等不到就先确认页面还在。页面都没了就别刷了，直接重建。
-        if (!running.get() || !connection.isBrowserUsable()) {
+        // 等不到就先确认浏览器还在。真的没了就别刷了，直接重建。
+        //
+        // 这里只要求「进程还在」，不要求 CDP 通道此刻就通——
+        // 因为紧接着要做的事正是刷新页面来重建通道。
+        if (!running.get() || !connection.isAlive()) {
             return false;
         }
 
@@ -500,19 +538,49 @@ public final class ChromeDanmakuSource {
      * <p>顺序很重要：{@code Network.enable} 必须在导航之前调用，
      * 因为浏览器不会补发已经发生过的网络事件，迟了就拿不到弹幕通道的地址。
      */
+    /**
+     * 启动浏览器并连上它的调试接口，顺便把防节流和网络监听都打开。
+     *
+     * <p>顺序很重要：{@code Network.enable} 必须在导航之前调用，
+     * 因为浏览器不会补发已经发生过的网络事件，迟了就拿不到弹幕通道的地址。
+     *
+     * <h2>为什么失败时要自己收拾干净</h2>
+     * 这一步里任何一个环节失败，{@code connection} 都还是局部变量，
+     * 调用方拿不到它。而 {@code launchChrome} 一旦成功，<b>Chrome 进程已经
+     * 起来了、并且占着配置目录</b>。不在这里关掉的话：
+     *
+     * <ol>
+     *   <li>浏览器进程泄漏，用户会看到一堆关不掉的窗口</li>
+     *   <li>更要命的是那个进程会占着 <b>lockfile</b>，导致调用方
+     *       「换个目录重试」时新进程把启动<b>转交给它然后自己退出</b>，
+     *       表现为 {@code 退出码 0}——实测日志里正是这么连环失败的。</li>
+     * </ol>
+     *
+     * <p>所以这里用 try/catch 兜住，失败就把半成品关掉再往外抛。
+     */
     private CdpConnection launchAndAttach(Path chromeExecutable, Path profileDir) throws IOException {
         Files.createDirectories(profileDir);
 
         listener.onState("正在启动浏览器…");
         CdpConnection connection = new CdpConnection(profileDir);
         connection.setEventListener(this::onCdpEvent);
-        connection.launchChrome(chromeExecutable, config.chromeWindowSize, config.chromeOffscreen);
-
-        String targetId = connection.openBlankPage();
-        connection.attachToPage(targetId);
-        connection.enableNetwork();
-        connection.prepareAntiThrottle();
-        return connection;
+        try {
+            connection.launchChrome(chromeExecutable, config.chromeWindowSize, config.chromeOffscreen);
+            String targetId = connection.openBlankPage();
+            connection.attachToPage(targetId);
+            connection.enableNetwork();
+            connection.prepareAntiThrottle();
+            return connection;
+        } catch (IOException | RuntimeException failed) {
+            // 半成品必须关掉：它可能已经启动了一个占着配置目录的浏览器进程。
+            // 关它本身也可能抛异常，那种情况忽略——不能让它盖掉真正的原因。
+            try {
+                connection.close();
+            } catch (RuntimeException ignored) {
+                // 已经不可达了，没什么可做的
+            }
+            throw failed;
+        }
     }
 
     /**
@@ -576,8 +644,12 @@ public final class ChromeDanmakuSource {
 
             listener.onState("浏览器已打开。登录好之后关掉窗口，再执行 /dy connect");
 
-            // 阻塞等用户关掉浏览器
-            while (connection.isAlive()) {
+            // 阻塞等用户关掉浏览器。
+            //
+            // 这里必须用 isOurProcessRunning() 而不是 isAlive()：
+            // 后者在「启动被转交给已有实例」时会恒为 true，
+            // 一旦发生转交这个循环就永远退不出来（窗口关了也不提示）。
+            while (connection.isOurProcessRunning()) {
                 try {
                     Thread.sleep(1000L);
                 } catch (InterruptedException interrupted) {
