@@ -82,6 +82,35 @@ public final class ChromeDanmakuSource {
     /** 页面加载后等多久再判断是否连上了弹幕通道。 */
     private static final long PAGE_SETTLE_MILLIS = 12_000L;
 
+    /**
+     * 弹幕通道断了之后，先干等多久看页面能不能自己接回来。
+     *
+     * <p>原来的值是 20 秒，太短了：网络抖动、抖音那边切服务器都可能超过它，
+     * 一超时就白重建一次浏览器。实测日志里几次断连都是卡在这个 20 秒上。
+     *
+     * <p>45 秒是权衡：足够度过常见的抖动，又不至于让用户等太久看不到弹幕
+     * （真等不到我们会去刷新页面，见 {@link #PAGE_RELOAD_WAIT_MILLIS}）。
+     */
+    private static final long CHANNEL_RECOVER_WAIT_MILLIS = 45_000L;
+
+    /**
+     * 刷新页面之后，再等多久弹幕通道出现。
+     *
+     * <p>比上面那个长一些：刷新要重新下载页面、执行 JS，本身就要几秒。
+     */
+    private static final long PAGE_RELOAD_WAIT_MILLIS = 60_000L;
+
+    /**
+     * 健康检查连续失败几次才判定「浏览器真的没了」。
+     *
+     * <p>检查本身是一次跨进程的同步调用（{@code Browser.getVersion}），
+     * 浏览器在忙着 GC、或者系统整体卡顿时，单次超时是正常的。
+     *
+     * <p>取 3：每轮间隔 1 秒，等于给浏览器 3 秒的喘息时间。
+     * 真的死了的话 3 秒后照样会被发现，不会漏判太久。
+     */
+    private static final int HEALTH_FAILURE_TOLERANCE = 3;
+
     private final DanmakuConfig config;
     private final Listener listener;
     private final Path baseDirectory;
@@ -159,9 +188,15 @@ public final class ChromeDanmakuSource {
     /**
      * 主循环：连上 → 保活 → 断了就自动重连。
      *
-     * <p>这个循环会一直转到用户主动断开为止。中途任何失败都只记录并退避重试，
-     * 不会让功能永久失效——直播场景下中途断连是很常见的
-     * （页面被省电机制冻结、网页自己刷新、网络抖动、主播重新开播等）。
+     * <p>这个循环会一直转到用户主动断开、或者连续失败太多次为止。
+     *
+     * <h2>为什么要给重试设上限</h2>
+     * 一开始这里是无条件无限重试的，理由是「直播中途断连很常见」。
+     * 但实测发现有个很烦的情况：<b>主播没开播时，它会一直转下去</b>——
+     * 每 5~60 秒开一次浏览器去看一眼，转一整晚，日志里堆满重复的失败。
+     *
+     * <p>所以现在把「该不该继续」交给 {@link ReconnectPolicy} 判断：
+     * 它按失败原因分两档上限，到顶就停下来并告诉用户怎么办。
      */
     private void run(String webRid) {
         try {
@@ -173,7 +208,7 @@ public final class ChromeDanmakuSource {
                 return;
             }
 
-            int consecutiveFailures = 0;
+            ReconnectPolicy policy = new ReconnectPolicy();
 
             while (running.get() && !Thread.currentThread().isInterrupted()) {
                 try {
@@ -182,16 +217,19 @@ public final class ChromeDanmakuSource {
                         return;
                     }
                     if (ok) {
-                        consecutiveFailures = 0;
+                        // 成功连上过一次就清零——直播是个长期过程，
+                        // 中途断几次很正常，不该累积到上限。
+                        policy.recordSuccess();
                     } else {
-                        consecutiveFailures++;
+                        // runOnce 返回 false 只有一种情况：页面开了但没找到弹幕通道
+                        policy.recordChannelNotFound();
                     }
                 } catch (InterruptedException interrupted) {
                     Thread.currentThread().interrupt();
                     return;
                 } catch (Exception failed) {
-                    consecutiveFailures++;
-                    DanmakuLog.error("Chrome 旁观失败（第 " + consecutiveFailures + " 次）", failed);
+                    policy.recordOtherFailure();
+                    DanmakuLog.error("Chrome 旁观失败（第 " + policy.consecutiveFailures() + " 次）", failed);
                     listener.onState("连接失败：" + failed.getMessage());
                 } finally {
                     closeChrome();
@@ -201,10 +239,23 @@ public final class ChromeDanmakuSource {
                     return;
                 }
 
-                // 指数退避：5 秒起，最多 60 秒。
-                // 第一次失败等的时间短一点，因为最常见的情况是网页自己刷新了一下。
-                long backoffSeconds = Math.min(60L, 5L * (1L << Math.min(consecutiveFailures, 4)) / 2L);
-                listener.onState("弹幕连接已断开，" + backoffSeconds + " 秒后自动重连…");
+                // ---- 到上限就停下来，并给出能照做的提示 ----
+                if (!policy.shouldRetry()) {
+                    if (policy.stoppedBecauseChannelNotFound()) {
+                        listener.onState("连续 " + policy.consecutiveFailures()
+                                + " 次都没找到直播间画面，先停止重试。最常见的原因是主播没开播。");
+                        listener.onState("等主播开播后，用 /dy connect " + webRid + " 再连一次即可。");
+                    } else {
+                        listener.onState("连续 " + policy.consecutiveFailures()
+                                + " 次连接失败，先停止重试。"
+                                + "可以看看日志文件里的报错，修好后用 /dy connect " + webRid + " 重连。");
+                    }
+                    return;
+                }
+
+                long backoffSeconds = policy.backoffSeconds();
+                listener.onState("弹幕连接已断开，" + backoffSeconds + " 秒后自动重连（第 "
+                        + (policy.consecutiveFailures() + 1) + " 次）…");
                 Thread.sleep(backoffSeconds * 1000L);
                 if (!running.get()) {
                     return;
@@ -251,6 +302,14 @@ public final class ChromeDanmakuSource {
         connection.navigate(pageUrl);
 
         // ---- 等弹幕通道出现 ----
+        //
+        // 判定「浏览器死了」用 isBrowserUsable()：它的定义是
+        // 「调试通道能应答 或 进程还活着」。所以这里返回 false 意味着
+        // 进程真的没了、通道也不通——那确实没救，早点报错别干等。
+        //
+        // 注意：浏览器刚启动的那一两秒里，CDP 通道还没握上手是正常的，
+        // 但那种情况进程是活的，isBrowserUsable() 会返回 true，
+        // 循环会继续等，不会误判。
         long deadline = System.currentTimeMillis() + PAGE_SETTLE_MILLIS;
         while (running.get() && System.currentTimeMillis() < deadline) {
             if (danmakuSocketId != null) {
@@ -275,6 +334,13 @@ public final class ChromeDanmakuSource {
         // 每 20 秒确认一次页面还活着、并把它钉在活跃状态。
         long lastKeepAlive = System.currentTimeMillis();
         long lastHealthLog = lastKeepAlive;
+        // 浏览器连续几次健康检查没通过。累积到阈值才判定「真的没了」。
+        //
+        // 为什么要容忍几次：CDP 是一次跨进程的同步调用，在浏览器忙着
+        // 做 GC、或者系统整体卡顿的时候，单次调用超时是正常现象。
+        // 早期版本一次不通就抛异常，等于把好好的连接推倒重来——
+        // 用户看到的就是「突然断联」。
+        int consecutiveHealthFailures = 0;
         // 每次连接都从零开始计数，免得把上一次的数字混进来
         framesReceived.set(0);
         framesDecoded.set(0);
@@ -282,8 +348,15 @@ public final class ChromeDanmakuSource {
         while (running.get() && !Thread.currentThread().isInterrupted()) {
             Thread.sleep(1000L);
 
-            if (!connection.isBrowserUsable()) {
-                throw new IOException("浏览器不可用了（" + connection.explainExit() + "）");
+            if (connection.isBrowserUsable()) {
+                consecutiveHealthFailures = 0;
+            } else {
+                consecutiveHealthFailures++;
+                if (consecutiveHealthFailures >= HEALTH_FAILURE_TOLERANCE) {
+                    throw new IOException("浏览器不可用了（" + connection.explainExit() + "）");
+                }
+                // 还没到阈值，这一轮先跳过，给浏览器一次喘息的机会
+                continue;
             }
 
             long now = System.currentTimeMillis();
@@ -295,25 +368,106 @@ public final class ChromeDanmakuSource {
                 lastKeepAlive = now;
                 connection.keepPageActive();
                 // 页面被丢弃 / 被冻结到不响应时，就干脆重连一次
-                if (!connection.isPageAlive()) {                    throw new IOException("直播间页面已失去响应（可能被浏览器的省电机制冻结了）");
+                if (!connection.isPageAlive()) {
+                    throw new IOException("直播间页面已失去响应"
+                            + "（可能被浏览器的省电机制冻结了）");
                 }
             }
 
-            // 页面自己刷新过，弹幕通道会重新建立；这里同步一下状态
+            // 页面自己刷新过，弹幕通道会重新建立；这里同步一下状态。
+            //
+            // 这段是「玩着玩着弹幕就没了」的修复点，改动理由见
+            // recoverChannel() 的注释。
             if (danmakuSocketId == null) {
-                listener.onState("弹幕通道断开了，等待页面重新建立连接…");
-                long reattachDeadline = System.currentTimeMillis() + 20_000L;
-                while (running.get() && danmakuSocketId == null
-                        && System.currentTimeMillis() < reattachDeadline) {
-                    Thread.sleep(500L);
+                if (!recoverChannel(connection, webRid)) {
+                    throw new IOException("弹幕通道断开后，等待和刷新页面都没能恢复");
                 }
-                if (danmakuSocketId == null) {
-                    throw new IOException("弹幕通道断开后没能重新建立");
-                }
-                listener.onState("弹幕通道已恢复，继续接收弹幕");
             }
         }
         return true;
+    }
+
+    /**
+     * 弹幕通道断了之后尝试恢复。<b>不重建浏览器。</b>
+     *
+     * <h2>为什么要有这个方法（修的是什么）</h2>
+     * 以前的逻辑是：通道一断 → 等 20 秒 → 还不行就抛异常 →
+     * 外层把浏览器整个关掉重建。实测这个做法有两个问题：
+     *
+     * <ol>
+     *   <li><b>弹幕会长时间消失。</b>重建浏览器要重新启动 Chrome、
+     *       重新打开直播间页面、等页面加载完（十几秒起步），
+     *       而这段时间里用户看到的是一片安静。</li>
+     *   <li><b>多数时候根本不需要重建。</b>抖音的网页在 WebSocket
+     *       断掉之后，自己往往不会重连（我们的实测日志里
+     *       「弹幕通道断开了，页面可能会自动重连…」后面从来没跟过
+     *       「弹幕通道已恢复」）。但<b>页面本身是好的</b>——
+     *       刷新一下就能重新建立通道，比重启浏览器快得多，
+     *       也不会多弹一个窗口出来。</li>
+     * </ol>
+     *
+     * <p>所以现在分三步，一步比一步重：
+     * <ol>
+     *   <li>先等 {@link #CHANNEL_RECOVER_WAIT_MILLIS}：可能是网络抖一下，
+     *       或者抖音服务器那边短暂切换，页面自己就接回来了。</li>
+     *   <li>还不行就<b>刷新页面</b>（{@code Page.reload}），
+     *       再等一次。复用同一个浏览器进程，登录状态、窗口位置都不变。</li>
+     *   <li>刷新也救不回来（比如页面已经彻底卡死、或者浏览器进程没了），
+     *       才返回 {@code false} 让外层走重建流程。</li>
+     * </ol>
+     *
+     * @return 通道恢复了返回 {@code true}；救不回来返回 {@code false}
+     */
+    private boolean recoverChannel(CdpConnection connection, String webRid) throws InterruptedException {
+        listener.onState("弹幕通道断开了，等待页面自动恢复…");
+
+        // 第一步：干等，看页面自己能不能接回来
+        if (waitForChannel(CHANNEL_RECOVER_WAIT_MILLIS)) {
+            listener.onState("弹幕通道已恢复，继续接收弹幕");
+            return true;
+        }
+
+        // 等不到就先确认浏览器还在。真的没了就别刷了，直接重建。
+        //
+        // 这里只要求「进程还在」，不要求 CDP 通道此刻就通——
+        // 因为紧接着要做的事正是刷新页面来重建通道。
+        if (!running.get() || !connection.isAlive()) {
+            return false;
+        }
+
+        // 第二步：刷新页面
+        listener.onState("页面没能自己接回来，刷新一下…");
+        try {
+            danmakuSocketId = null;
+            socketUrls.clear();
+            connection.reloadPage(false);
+        } catch (Exception reloadFailed) {
+            DanmakuLog.error("刷新直播间页面失败", reloadFailed);
+            return false;
+        }
+
+        if (waitForChannel(PAGE_RELOAD_WAIT_MILLIS)) {
+            listener.onState("刷新后弹幕通道已恢复，继续接收弹幕");
+            return true;
+        }
+
+        // 第三步：刷新也没用。可能是直播间真的关了，交给外层处理。
+        DanmakuLog.info("刷新页面后仍未找到弹幕通道（直播间 " + webRid + "）");
+        return false;
+    }
+
+    /**
+     * 等弹幕通道重新出现。
+     *
+     * @return 在超时前出现了返回 {@code true}
+     */
+    private boolean waitForChannel(long timeoutMillis) throws InterruptedException {
+        long deadline = System.currentTimeMillis() + timeoutMillis;
+        while (running.get() && danmakuSocketId == null
+                && System.currentTimeMillis() < deadline) {
+            Thread.sleep(250L);
+        }
+        return danmakuSocketId != null;
     }
 
     /**
@@ -384,19 +538,49 @@ public final class ChromeDanmakuSource {
      * <p>顺序很重要：{@code Network.enable} 必须在导航之前调用，
      * 因为浏览器不会补发已经发生过的网络事件，迟了就拿不到弹幕通道的地址。
      */
+    /**
+     * 启动浏览器并连上它的调试接口，顺便把防节流和网络监听都打开。
+     *
+     * <p>顺序很重要：{@code Network.enable} 必须在导航之前调用，
+     * 因为浏览器不会补发已经发生过的网络事件，迟了就拿不到弹幕通道的地址。
+     *
+     * <h2>为什么失败时要自己收拾干净</h2>
+     * 这一步里任何一个环节失败，{@code connection} 都还是局部变量，
+     * 调用方拿不到它。而 {@code launchChrome} 一旦成功，<b>Chrome 进程已经
+     * 起来了、并且占着配置目录</b>。不在这里关掉的话：
+     *
+     * <ol>
+     *   <li>浏览器进程泄漏，用户会看到一堆关不掉的窗口</li>
+     *   <li>更要命的是那个进程会占着 <b>lockfile</b>，导致调用方
+     *       「换个目录重试」时新进程把启动<b>转交给它然后自己退出</b>，
+     *       表现为 {@code 退出码 0}——实测日志里正是这么连环失败的。</li>
+     * </ol>
+     *
+     * <p>所以这里用 try/catch 兜住，失败就把半成品关掉再往外抛。
+     */
     private CdpConnection launchAndAttach(Path chromeExecutable, Path profileDir) throws IOException {
         Files.createDirectories(profileDir);
 
         listener.onState("正在启动浏览器…");
         CdpConnection connection = new CdpConnection(profileDir);
         connection.setEventListener(this::onCdpEvent);
-        connection.launchChrome(chromeExecutable, config.chromeWindowSize, config.chromeOffscreen);
-
-        String targetId = connection.openBlankPage();
-        connection.attachToPage(targetId);
-        connection.enableNetwork();
-        connection.prepareAntiThrottle();
-        return connection;
+        try {
+            connection.launchChrome(chromeExecutable, config.chromeWindowSize, config.chromeOffscreen);
+            String targetId = connection.openBlankPage();
+            connection.attachToPage(targetId);
+            connection.enableNetwork();
+            connection.prepareAntiThrottle();
+            return connection;
+        } catch (IOException | RuntimeException failed) {
+            // 半成品必须关掉：它可能已经启动了一个占着配置目录的浏览器进程。
+            // 关它本身也可能抛异常，那种情况忽略——不能让它盖掉真正的原因。
+            try {
+                connection.close();
+            } catch (RuntimeException ignored) {
+                // 已经不可达了，没什么可做的
+            }
+            throw failed;
+        }
     }
 
     /**
@@ -460,8 +644,12 @@ public final class ChromeDanmakuSource {
 
             listener.onState("浏览器已打开。登录好之后关掉窗口，再执行 /dy connect");
 
-            // 阻塞等用户关掉浏览器
-            while (connection.isAlive()) {
+            // 阻塞等用户关掉浏览器。
+            //
+            // 这里必须用 isOurProcessRunning() 而不是 isAlive()：
+            // 后者在「启动被转交给已有实例」时会恒为 true，
+            // 一旦发生转交这个循环就永远退不出来（窗口关了也不提示）。
+            while (connection.isOurProcessRunning()) {
                 try {
                     Thread.sleep(1000L);
                 } catch (InterruptedException interrupted) {
