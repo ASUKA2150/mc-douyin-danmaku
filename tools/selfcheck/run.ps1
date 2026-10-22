@@ -45,6 +45,7 @@ $sources = @(
     (Join-Path $srcDir 'DecodeCheck.java'),
     (Join-Path $coreDir 'com\douyindanmaku\core\DanmakuLog.java'),
     (Join-Path $coreDir 'com\douyindanmaku\core\FileLog.java'),
+    (Join-Path $coreDir 'com\douyindanmaku\core\chrome\ReconnectPolicy.java'),
     (Join-Path $coreDir 'com\douyindanmaku\core\config\DanmakuConfig.java'),
     (Join-Path $coreDir 'com\douyindanmaku\core\model\DanmakuMessage.java'),
     (Join-Path $coreDir 'com\douyindanmaku\core\model\DanmakuEvent.java'),

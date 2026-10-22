@@ -315,6 +315,12 @@ final class CdpConnection {
      * <p>光说「退出了」用户没法处理，必须把退出码翻译成人话。
      */
     String explainExit() {
+        if (handedOffToExistingBrowser) {
+            // 转交本身是成功的，那么调用方看到「不可用」说明
+            // 那个被转交的实例也不行了
+            return "启动被转交给了已有的浏览器实例，但那个实例的调试通道也连不上。"
+                    + "请关掉之前所有由本模组启动的浏览器进程（配置目录见日志），再重试。";
+        }
         Process process = chromeProcess;
         if (process == null) {
             return "浏览器进程对象不存在";
@@ -624,6 +630,27 @@ final class CdpConnection {
     }
 
     /**
+     * 让页面重新加载当前地址（相当于按 F5）。
+     *
+     * <h2>为什么需要这个，而不是直接 navigate 到原地址</h2>
+     * 效果上两者差不多，但 {@code Page.reload} 不需要我们记住地址，
+     * 也会保留浏览器的后退栈和历史记录。更重要的是语义清楚：
+     * 「页面卡了，刷一下」，而不是「换一个页面」。
+     *
+     * @param ignoreCache 是否绕过缓存。绕缓存会重新下载页面资源，
+     *                    慢一些但更可能是干净状态；正常情况下不需要。
+     */
+    void reloadPage(boolean ignoreCache) throws IOException {
+        CdpWebSocket socket = pageSocket;
+        if (socket == null) {
+            throw new IOException("还没有连接到页面，无法刷新（调用顺序错误："
+                    + "必须先 openBlankPage 再 attachToPage）");
+        }
+        socket.call("Page.reload",
+                "{\"ignoreCache\":" + ignoreCache + "}");
+    }
+
+    /**
      * 打开抖音直播首页，让用户登录。
      *
      * <p>用首页而不是某个直播间：登录是站点级别的，首页有登录入口，
@@ -698,7 +725,40 @@ final class CdpConnection {
         }
     }
 
+    /**
+     * 我们启动的那个进程还在不在。
+     *
+     * <p><b>注意「转交」的情况。</b>当 Chrome 把启动转交给一个已经运行的
+     * 实例时，我们启动的这个进程会<b>立刻退出（退出码 0）</b>，但浏览器
+     * 本体活得好好的。此时问「进程还在不在」答案是「不在」，
+     * 可浏览器明明能用——早期版本就栽在这里，把正常情况当成了浏览器死亡。
+     *
+     * <p>所以转交状态下直接返回 {@code true}：语义上「浏览器还活着」，
+     * 而不是「那个占位进程还活着」。真正判断能不能用的是
+     * {@link #isBrowserReachable()}。
+     *
+     * <p>如果你要的是字面意义上的「这个进程对象还活着」，
+     * 用 {@link #isOurProcessRunning()}。
+     */
     boolean isAlive() {
+        if (handedOffToExistingBrowser) {
+            return true;
+        }
+        return chromeProcess != null && chromeProcess.isAlive();
+    }
+
+    /**
+     * 字面意义：我们启动的那个进程对象现在还活不活。
+     *
+     * <p>和 {@link #isAlive()} 的区别只有一处：<b>转交状态下这里返回 false</b>
+     * （那个进程确实退了），而 {@code isAlive()} 返回 true（浏览器能用）。
+     *
+     * <p>什么时候需要这个？等「窗口被用户关掉」的时候。
+     * 登录窗口那条路径要一直等到浏览器真的退出，如果用 {@code isAlive()}，
+     * 一旦这一次启动发生了转交，循环就永远退不出来——窗口明明关了、
+     * 提示却一直不出来。这是个很难复现的坑。
+     */
+    boolean isOurProcessRunning() {
         return chromeProcess != null && chromeProcess.isAlive();
     }
 
