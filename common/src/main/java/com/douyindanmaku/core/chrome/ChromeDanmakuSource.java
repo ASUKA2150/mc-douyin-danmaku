@@ -67,6 +67,24 @@ public final class ChromeDanmakuSource {
 
         /** 收到直播间统计（在线人数、累计获赞）。可能很频繁，实现方自己决定要不要每次都处理。 */
         void onRoomStats(com.douyindanmaku.core.model.RoomStats stats);
+
+        /**
+         * 出了需要用户<b>立刻知道</b>的问题（断连、浏览器没了、放弃重试）。
+         *
+         * <h2>为什么不复用 {@link #onState(String)}</h2>
+         * 状态提示太多了——「正在打开页面」「已找到通道」都走那条路。
+         * 如果全部都弄出动静，用户会被吵到把提醒关掉，那就等于没有。
+         *
+         * <p>所以这里<b>只报真正要紧的</b>：弹幕断了的、浏览器起不来的、
+         * 模组要放弃重试的那几种。实现方可以用声音、屏幕标题这些
+         * 「玩着游戏也能注意到」的方式提醒，而不只是往聊天栏写一行。
+         *
+         * <p>给了 default 实现，是为了让不关心提醒的调用方
+         * （比如单元测试里的假 Listener）不用改。
+         */
+        default void onAlert(String detail) {
+            // 默认什么也不做
+        }
     }
 
     /** 判断一个 WebSocket 地址是不是抖音的弹幕通道。 */
@@ -79,8 +97,20 @@ public final class ChromeDanmakuSource {
     /** 队列容量。满了就丢最旧的——弹幕丢几条无所谓，卡住连接才是大问题。 */
     private static final int QUEUE_CAPACITY = 512;
 
-    /** 页面加载后等多久再判断是否连上了弹幕通道。 */
-    private static final long PAGE_SETTLE_MILLIS = 12_000L;
+    /**
+     * 页面加载后等多久再判断是否连上了弹幕通道。
+     *
+     * <p>原来是 12 秒，实测不够。这个值必须容忍「机器很忙」的情况：
+     * 用户一边推流一边玩 Minecraft，Chrome 还要加载抖音那个很重的页面，
+     * 12 秒经常连页面都没跑完 JS，自然抓不到弹幕 WebSocket。
+     *
+     * <p>实测数据：正常情况 5 秒左右能找到通道；直播推流时同一次会超过
+     * 12 秒，然后被误判成「没找到弹幕通道」，白白重连一次。
+     *
+     * <p>30 秒的代价只是「主播真的没开播时多等一会儿」，
+     * 而收益是「机器繁忙时不会误判」——后者严重得多。
+     */
+    private static final long PAGE_SETTLE_MILLIS = 30_000L;
 
     /**
      * 弹幕通道断了之后，先干等多久看页面能不能自己接回来。
@@ -204,6 +234,8 @@ public final class ChromeDanmakuSource {
             if (chromeExecutable == null) {
                 listener.onState("找不到 Chrome。请安装 Chrome，"
                         + "或在配置文件里把 chromePath 填成 chrome.exe 的完整路径。");
+                // 这是彻底没法工作的情况，必须让用户知道
+                listener.onAlert("找不到浏览器，弹幕收不到了");
                 running.set(false);
                 return;
             }
@@ -231,6 +263,8 @@ public final class ChromeDanmakuSource {
                     policy.recordOtherFailure();
                     DanmakuLog.error("Chrome 旁观失败（第 " + policy.consecutiveFailures() + " 次）", failed);
                     listener.onState("连接失败：" + failed.getMessage());
+                    // 浏览器没了 / 通道恢复不了，都归到这类
+                    listener.onAlert("弹幕连接失败：" + shortReason(failed));
                 } finally {
                     closeChrome();
                 }
@@ -245,10 +279,13 @@ public final class ChromeDanmakuSource {
                         listener.onState("连续 " + policy.consecutiveFailures()
                                 + " 次都没找到直播间画面，先停止重试。最常见的原因是主播没开播。");
                         listener.onState("等主播开播后，用 /dy connect " + webRid + " 再连一次即可。");
+                        listener.onAlert("已停止重试，弹幕不会再来。开播后请输入 /dy connect "
+                                + webRid);
                     } else {
                         listener.onState("连续 " + policy.consecutiveFailures()
                                 + " 次连接失败，先停止重试。"
                                 + "可以看看日志文件里的报错，修好后用 /dy connect " + webRid + " 重连。");
+                        listener.onAlert("已停止重试，弹幕不会再来。请检查后 /dy connect " + webRid);
                     }
                     return;
                 }
@@ -256,6 +293,10 @@ public final class ChromeDanmakuSource {
                 long backoffSeconds = policy.backoffSeconds();
                 listener.onState("弹幕连接已断开，" + backoffSeconds + " 秒后自动重连（第 "
                         + (policy.consecutiveFailures() + 1) + " 次）…");
+                // 断连是用户最想立刻知道的事——他可能正看着游戏，
+                // 完全没意识到弹幕已经停了。
+                listener.onAlert("弹幕断了，" + backoffSeconds + " 秒后自动重连（第 "
+                        + (policy.consecutiveFailures() + 1) + " 次）");
                 Thread.sleep(backoffSeconds * 1000L);
                 if (!running.get()) {
                     return;
@@ -320,8 +361,15 @@ public final class ChromeDanmakuSource {
             }
             Thread.sleep(250L);
         }
-
         if (danmakuSocketId == null) {
+            // 把页面现在到底长什么样记下来。这一步是为了让「找不到弹幕通道」
+            // 这件事可诊断——不然永远只能猜「是不是没开播」。
+            //
+            // 最常见的三种情况，看一眼日志就能区分：
+            //   1. 地址栏还停在 about:blank  → 页面根本没导航出去
+            //   2. 标题/地址里有 login 或验证码 → 抖音要求登录或有风控
+            //   3. 地址是对的、标题也是直播间 → 页面加载太慢，JS 还没跑完
+            logPageState(connection, webRid);
             listener.onState("页面打开了，但没找到弹幕通道。"
                     + "可能原因：直播间号不对、主播没开播、或者网络访问抖音有问题。");
             return false;
@@ -385,6 +433,70 @@ public final class ChromeDanmakuSource {
             }
         }
         return true;
+    }
+
+    /**
+     * 把页面当前的状态记进日志，用来诊断「找不到弹幕通道」。
+     *
+     * <p>只记三样东西，都是判断问题所在最直接的线索：地址、标题、
+     * 以及页面上有没有「登录」字样。
+     *
+     * <p>这个方法是纯诊断用的，<b>任何失败都不能影响主流程</b>，
+     * 所以整体兜在一个 try 里，出错就写「取不到」然后算了。
+     */
+    private void logPageState(CdpConnection connection, String webRid) {
+        String url = "取不到";
+        String title = "取不到";
+        String loginHint = "取不到";
+        try {
+            String u = connection.evaluate("location.href");
+            if (u != null) {
+                url = u;
+            }
+            String t = connection.evaluate("document.title");
+            if (t != null) {
+                title = t;
+            }
+            // 抖音的登录墙/风控页通常会有这些字样。判断一下能让日志直接说话。
+            String hasLogin = connection.evaluate(
+                    "(() => { const b = document.body;"
+                            + " if (!b) return 'no-body';"
+                            + " const s = (b.innerText || '').slice(0, 3000);"
+                            + " return /登录|验证码|安全验证|扫码/.test(s) ? 'yes' : 'no'; })()");
+            if (hasLogin != null) {
+                loginHint = hasLogin;
+            }
+        } catch (Exception ignored) {
+            // 诊断失败不影响主流程
+        }
+        DanmakuLog.info("页面状态诊断（直播间 " + webRid + "）："
+                + "地址=" + url
+                + " 标题=" + title
+                + " 页面上有登录/验证码字样=" + loginHint);
+    }
+
+    /**
+     * 把异常压缩成一句话，用来放进提醒里。
+     *
+     * <p>异常消息可能很长（比如带一堆路径和建议），而提醒要显示成
+     * 屏幕标题，太长会被截断或者换行得很丑。所以这里只取
+     * 第一句话、并且限长。
+     */
+    private static String shortReason(Throwable failed) {
+        String message = failed.getMessage();
+        if (message == null || message.isBlank()) {
+            return failed.getClass().getSimpleName();
+        }
+        // 取第一个句号/分号之前的部分
+        int cut = message.length();
+        for (char stop : new char[]{'。', '；', '.', ';'}) {
+            int at = message.indexOf(stop);
+            if (at > 0 && at < cut) {
+                cut = at;
+            }
+        }
+        String first = message.substring(0, cut).trim();
+        return first.length() > 40 ? first.substring(0, 40) + "…" : first;
     }
 
     /**

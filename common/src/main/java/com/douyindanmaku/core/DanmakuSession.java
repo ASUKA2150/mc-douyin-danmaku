@@ -313,6 +313,11 @@ public final class DanmakuSession {
                     }
 
                     @Override
+                    public void onAlert(String detail) {
+                        alert(detail);
+                    }
+
+                    @Override
                     public void onRoomStats(com.douyindanmaku.core.model.RoomStats stats) {
                         long previousOnline = roomStats.online();
                         String previousWatched = roomStats.watched();
@@ -566,6 +571,28 @@ public final class DanmakuSession {
             statusSink.accept(message);
         } catch (RuntimeException ignored) {
             // 状态回调是可选的
+        }
+    }
+
+    /**
+     * 出大问题时的提醒（断连、浏览器没了、放弃重试）。
+     *
+     * <p>就是聊天栏里一行<b>红字</b>，不做声音和屏幕标题。
+     * 直播间弹幕断了是件要紧事，值得一个和普通提示不同的颜色；
+     * 但也仅此而已——搞得太特殊反而吵。
+     *
+     * <p>配置里 {@code alertOnDisconnect} 关掉之后就只记日志，不显示。
+     */
+    public void alert(String message) {
+        DanmakuLog.info("提醒：" + message);
+        if (!snapshot().alertOnDisconnect) {
+            return;
+        }
+        String rendered = DanmakuFormatter.formatSystem("&c" + message, snapshot());
+        try {
+            messageSink.accept(rendered, DanmakuEvent.Kind.CHAT);
+        } catch (RuntimeException failed) {
+            DanmakuLog.error("显示提醒失败", failed);
         }
     }
 }

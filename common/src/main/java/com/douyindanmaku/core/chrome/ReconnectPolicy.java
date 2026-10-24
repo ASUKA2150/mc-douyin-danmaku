@@ -22,8 +22,21 @@ package com.douyindanmaku.core.chrome;
  */
 final class ReconnectPolicy {
 
-    /** 「没找到弹幕通道」这种失败，连续几次就放弃。 */
-    static final int MAX_CHANNEL_NOT_FOUND_FAILURES = 5;
+    /**
+     * 「没找到弹幕通道」这种失败，连续几次就放弃。
+     *
+     * <p><b>这个值从 5 提到了 20，因为实测打脸了。</b>
+     * 原本的想法是：找不到通道 = 主播没开播，重试再多次也没用，早点停。
+     *
+     * <p>但直播实测发现：<b>主播明明在播，也会连续好几次找不到通道。</b>
+     * 原因不是没开播，而是页面加载太慢（机器一边推流一边跑 Minecraft），
+     * 或者上一次的浏览器还占着配置目录。这种情况下模组几次之后就永久放弃，
+     * 主播得手动 {@code /dy connect}——正在直播时非常难受。
+     *
+     * <p>20 次配合退避（最长 60 秒）大约是 15~20 分钟的持续尝试，
+     * 足够覆盖开机、推流软件启动、页面卡顿这些暂时状况。
+     */
+    static final int MAX_CHANNEL_NOT_FOUND_FAILURES = 20;
 
     /** 其它失败连续几次就放弃。 */
     static final int MAX_OTHER_FAILURES = 10;
