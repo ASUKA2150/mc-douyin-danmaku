@@ -736,14 +736,30 @@ public class DecodeCheck {
             // ---- 初始状态：没有任何失败，应该继续 ----
             check(name + " -> 初始应该继续重试", (boolean) mShould.invoke(p));
 
-            // ---- 「没找到通道」：5 次就到顶 ----
-            for (int i = 1; i <= 4; i++) {
+            // ---- 「没找到通道」：到预设上限才放弃 ----
+            //
+            // 上限从类里读，不写死数字。这个值调过两次了
+            // （5 -> 20，因为实测证明主播在播也会连续失败好几次），
+            // 写死的话每次调参都得改测试。
+            java.lang.reflect.Field limitField =
+                    cls.getDeclaredField("MAX_CHANNEL_NOT_FOUND_FAILURES");
+            limitField.setAccessible(true);
+            int channelLimit = (int) limitField.get(null);
+            check(name + " -> 没找到通道的上限是个正数", channelLimit > 0);
+
+            for (int i = 1; i < channelLimit; i++) {
                 mNotFound.invoke(p);
-                check(name + " -> 没找到通道第 " + i + " 次还能重试", (boolean) mShould.invoke(p));
+                if (!(boolean) mShould.invoke(p)) {
+                    check(name + " -> 没找到通道第 " + i + " 次不该到顶（上限 "
+                            + channelLimit + "）", false);
+                    break;
+                }
             }
             mNotFound.invoke(p);
-            check(name + " -> 没找到通道第 5 次到顶", !(boolean) mShould.invoke(p));
-            check(name + " -> 到顶时失败次数是 5", (int) mCount.invoke(p) == 5);
+            check(name + " -> 没找到通道第 " + channelLimit + " 次到顶",
+                    !(boolean) mShould.invoke(p));
+            check(name + " -> 到顶时失败次数是 " + channelLimit,
+                    (int) mCount.invoke(p) == channelLimit);
             check(name + " -> 原因标成「没找到通道」", (boolean) mReason.invoke(p));
 
             // ---- 成功一次就清零（直播中途断几次不该累积）----
