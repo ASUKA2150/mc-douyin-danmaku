@@ -177,6 +177,20 @@ public final class DanmakuConfig {
     /** 是否把弹幕写进聊天记录（按 T 打开的那个界面）。 */
     public boolean keepHistory = true;
 
+    /**
+     * 断连、浏览器出问题时要不要<b>弄出动静</b>提醒（声音 + 屏幕标题）。
+     *
+     * <p>默认<b>开</b>。理由很实际：玩 Minecraft 的时候人是盯着画面的，
+     * 聊天栏新冒一行字根本注意不到。等发现弹幕没了，可能已经错过了
+     * 十几分钟的互动。
+     *
+     * <p>提醒只在真正要紧的时候响：断连重试、浏览器起不来、
+     * 模组放弃重试。正常的「正在连接」「已找到通道」不会响。
+     *
+     * <p>嫌吵可以关掉，那之后就只往聊天栏写一行红字。
+     */
+    public boolean alertOnDisconnect = true;
+
     /** 是否在弹幕前显示抖音等级。 */
     public boolean showUserLevel = true;
 
@@ -481,6 +495,7 @@ public final class DanmakuConfig {
         copy.chatContentOverride = chatContentOverride;
         copy.ensureChat = ensureChat;
         copy.keepHistory = keepHistory;
+        copy.alertOnDisconnect = alertOnDisconnect;
         copy.showUserLevel = showUserLevel;
         copy.showFanClub = showFanClub;
         copy.chatFormat = chatFormat;
