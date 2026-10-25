@@ -10,7 +10,7 @@
 // 所以下面这行的版本号改的时候，要连同 gradle.properties 里的
 // fabric.loom.version 一起改（那个值只是给人看的文档，插件块读不到它）。
 plugins {
-    id 'fabric-loom' version '1.11.8'
+    id 'fabric-loom' version '1.13.6'
     id 'maven-publish'
 }
 

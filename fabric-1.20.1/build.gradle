@@ -15,7 +15,7 @@
 // 注意：Loom 1.11.x 同时支持 Minecraft 1.20.1 和 1.21.1，
 // 所以两个 Fabric 子项目用的是同一个 Loom 版本。
 plugins {
-    id 'fabric-loom' version '1.11.8'
+    id 'fabric-loom' version '1.13.6'
     id 'maven-publish'
 }
 

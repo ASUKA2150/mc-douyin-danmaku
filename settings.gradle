@@ -41,6 +41,12 @@ project(':neoforge-1.21.1').projectDir = file('neoforge')
 
 include 'forge-1.21.1'
 
+// ---- Minecraft 1.21.11 ----
+// 目前只有 Fabric。这一版和 1.21.1 的 API 差得不多
+// （Gui.getChat / LocalPlayer.displayClientMessage / Component.literal 都没变），
+// 所以加载器层的代码照抄过来就能用，只是版本号不同。
+include 'fabric-1.21.11'
+
 // ---- Minecraft 1.20.1 ----
 // 注意：1.20.1 只有 Fabric 和 Forge，没有 NeoForge——
 // NeoForge 的第一个版本是给 Minecraft 1.20.2 的，1.20.1 时代只有 Forge。

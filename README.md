@@ -15,6 +15,7 @@
 | 1.21.1 | Fabric | `douyin-danmaku-fabric-1.21.1-1.0.0.jar` |
 | 1.21.1 | Forge | `douyin-danmaku-forge-1.21.1-1.0.0.jar` |
 | 1.21.1 | NeoForge | `douyin-danmaku-neoforge-1.21.1-1.0.0.jar` |
+| 1.21.11 | Fabric | `douyin-danmaku-fabric-1.21.11-1.0.0.jar` |
 
 ---
 
